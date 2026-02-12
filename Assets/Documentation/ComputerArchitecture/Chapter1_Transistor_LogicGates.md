@@ -857,6 +857,25 @@ RAM trong máy bạn = hàng tỷ transistors đơn (DRAM).
 
 ---
 
+## 7. Mảnh ghép còn thiếu — Kẻ đã quên mình là ai
+
+Chúng ta đã xây dựng được ALU — một cỗ máy tính toán siêu việt từ hàng nghìn cổng logic.
+- Nó có thể tính `5000 + 3000` trong nháy mắt.
+- Nó có thể so sánh `health <= 0` cực nhanh.
+
+**NHƯNG... có một vấn đề chết người:**
+Ngay khi dòng điện đi qua, cổng logic trả về kết quả, và sau đó... **nó quên sạch**.
+- Input tắt → Output tắt.
+- Không có cách nào để lưu số "8000" lại để dùng cho phép tính sau.
+
+Một CPU mà không có bộ nhớ (Memory) thì chỉ là một chiếc máy tính bỏ túi không có nút "M+" — vô dụng với các chương trình phức tạp.
+
+Để biến chiếc máy tính này thành một **Computer** thực thụ, ta cần một loại mạch điện mới: Một loại mạch có thể **tự duy trì dòng điện** của chính nó.
+
+👉 **Mời bước sang Chapter 2: Nơi ta học cách "bẫy" electron để tạo ra Ký ức.**
+
+---
+
 > **Chương tiếp theo:** [Chapter 2 — Memory & Storage: Từ Flip-flop đến RAM]() — Cách transistor tạo ra bộ nhớ, và tại sao Memory Hierarchy là chìa khóa của hiệu năng DOTS.
 
 ---
