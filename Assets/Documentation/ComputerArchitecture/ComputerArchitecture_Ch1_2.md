@@ -23,99 +23,267 @@ Assembly không có segment `.stack` hay `.heap` (tùy OS/Linker, nhưng về b�
 | **Stack** | Stack | Biến cục bộ, tham số hàm. | Lớn ra/thu vào liên tục. Quản lý bởi thanh ghi `RSP`. | `int localVariable = 5;` |
 | **Heap** | Heap | Đối tượng cấp phát động. | Sống cho đến khi GC dọn dẹp. Quản lý bởi OS/Runtime. | `new Enemy();` |
 
-> **Tại sao .bss quan trọng?** Nếu bạn khai báo `static byte[] buffer = new byte[1000000];` (1MB):
-> *   Nếu để trong `.data` (đã khởi tạo): File .exe của bạn sẽ tăng thêm 1MB (chứa toàn số 0).
 > *   Nếu để trong `.bss` (chưa khởi tạo): File .exe **không tăng byte nào**. Window Loader chỉ cần biết "À, cấp cho anh này 1MB số 0" là xong. Tiết kiệm đĩa!
 
+### c. Program Segments in Action (RISC/ARM64 Example)
 
+Để dễ học, chúng ta sẽ dùng kiến trúc **ARM64** (RISC) — kiến trúc dùng trong iPhone, Mac M1/M2 và Android. RISC rất rõ ràng vì nó phân biệt cực kỳ rạch ròi giữa lệnh tính toán và lệnh truy cập bộ nhớ (**Load-Store Architecture**).
 
-## 2. Kiến trúc CPU: Bộ ba trụ cột (ALU - CU - Registers)
+```asm
+; ==========================================
+; 1. RODATA (Read-Only Data)
+; ==========================================
+.section .rodata
+    msg_format: .asciz "Score: %d\n"    ; Chuỗi kết thúc bằng \0
+    PI:         .double 3.14159
 
-Để CPU chạy được, nó cần sự phối hợp nhịp nhàng của 3 bộ phận cốt lõi. Hãy tưởng tượng CPU là một **Nhà bếp siêu tốc**:
+; ==========================================
+; 2. DATA (Initialized Data)
+; ==========================================
+.section .data
+    .align 4
+    score:      .word 100              ; int score = 100 (4 bytes)
 
-### a. ALU (Arithmetic Logic Unit) — Cỗ máy thực thi
-*   **Phân vai:** Đầu bếp.
-*   **Nhiệm vụ:** Thực hiện các phép tính toán (cộng, trừ, nhân, chia) và so sánh logic (`a > b`).
-*   **Vật lý:** Được xây dựng từ hàng triệu cổng logic (Chương 1).
-*   **Ví dụ:** Khi bạn tính `hp - damage`, ALU chính là mạch điện trực tiếp trừ hai con số đó.
+; ==========================================
+; 3. BSS (Uninitialized Data)
+; ==========================================
+.section .bss
+    .align 8
+    player_pos: .skip 12               ; float[3] (mặc định = 0)
+    buffer:     .skip 1024             ; 1KB buffer
 
-### b. CU (Control Unit) — Bộ não điều phối
-*   **Phân vai:** Bếp trưởng / Người quản lý.
-*   **Nhiệm vụ:** Đọc mã lệnh (Opcode) từ RAM, giải mã xem lệnh đó là gì, và gửi tín hiệu điện để "bật" ALU hoặc "mở" kho dữ liệu.
-*   **Cơ chế:** Hoạt động như một câu lệnh `switch(opcode)` khổng lồ bằng phần cứng.
-*   **Ví dụ:** Khi thấy lệnh `ADD`, CU sẽ bật tín hiệu "Enable" cho mạch cộng của ALU.
+; ==========================================
+; 4. TEXT (Code Segment)
+; ==========================================
+.section .text
+    .global main
 
-### c. Registers (MU - Memory Unit) — Kho chứa tạm thời
-*   **Phân vai:** Bàn sơ chế / Thớt.
-*   **Nhiệm vụ:** Lưu trữ dữ liệu và địa chỉ bộ nhớ mà CPU đang cần dùng **ngay lập tức**. Truy cập vào đây nhanh gấp hàng nghìn lần so với RAM.
+main:
+    ; --- Thao tác trên .data (LOAD-MODIFY-STORE) ---
+    ; 1. Load địa chỉ và giá trị
+    adrp x0, score                     ; Lấy địa chỉ trang chứa 'score'
+    add  x0, x0, :lo12:score           ; Lấy địa chỉ chính xác vào x0
+    ldr  w1, [x0]                      ; LOAD: Đọc giá trị từ RAM vào register w1
 
-**Các thanh ghi x86-64 phổ biến:**
-*   **RAX:** Thường chứa kết quả trả về của hàm.
-*   **RIP (Instruction Pointer):** Con trỏ lệnh. Trỏ tới dòng code tiếp theo sẽ chạy.
-*   **RSP (Stack Pointer):** Trỏ tới đỉnh của Stack.
-*   **RDX, RCX, RBX...:** Các thanh ghi đa năng chứa biến tạm.
+    ; 2. MODIFY (Tính toán trong CPU)
+    add  w1, w1, #50                   ; score += 50
 
----
+    ; 3. STORE (Ghi trả lại RAM)
+    str  w1, [x0]                      ; STORE: Ghi w1 vào địa chỉ trong x0
 
-## 3. Làm sao CPU "hiểu" được lệnh? (Deep Dive: CU)
+    ; --- Thao tác trên .bss ---
+    adrp x2, player_pos
+    add  x2, x2, :lo12:player_pos
+    mov  w3, #10
+    str  w3, [x2]                      ; player_pos[0] = 10
 
-Làm sao chuỗi bit `0101` lại biến thành hành động vật lý?
+    ; --- Gọi printf (Sử dụng .rodata) ---
+    adrp x0, msg_format
+    add  x0, x0, :lo12:msg_format      ; Tham số 1: format string
+    ; w1 đang chứa giá trị score mới (150)
+    bl   printf                        ; Branch with Link (Gọi hàm)
 
-### a. Quá trình giải mã (Decoding)
-CPU có một bảng tra cứu bằng phần cứng (**Instruction Decoder**):
+    ; Thoát chương trình
+    mov  w0, #0                        ; return 0
+    ret
+```
 
-| Opcode (Binary) | Lệnh | CU sẽ làm gì? |
+> [!TIP]
+> **Tại sao RISC dễ đọc hơn?** Ở x86 (CISC), bạn có thể dùng `ADD [score], 50` (1 lệnh làm cả 3 việc). Ở ARM (RISC), bạn BẮT BUỘC phải làm 3 bước: **LDR** (Load) → **ADD** (Tính) → **STR** (Store). Điều này giúp bạn thấy rõ dòng chảy dữ liệu giữa RAM và CPU.
+
+### d. Dynamic Segments (Stack & Heap) in Action
+
+Khác với 4 segment tĩnh bên trên, **Stack** và **Heap** không được khai báo bằng từ khóa `.section`. Chúng được thể hiện thông qua các **lệnh điều khiển thanh ghi** và **hàm hệ thống**:
+
+#### 1. Stack — Thể hiện qua Stack Pointer (SP)
+Trong ARM64, Stack được quản lý bởi thanh ghi `SP`. Khi bạn gọi một hàm, CPU sẽ "mở rộng" Stack bằng cách giảm giá trị `SP`.
+
+```asm
+; --- Ví dụ về Stack (Push/Pop) ---
+some_function:
+    ; 1. PROLOGUE: Cấp phát 16 bytes trên Stack
+    sub sp, sp, #16             ; SP = SP - 16 (Dịch đỉnh Stack xuống)
+    
+    ; 2. Lưu biến cục bộ vào Stack
+    mov w0, #42
+    str w1, [sp, #8]            ; Lưu giá trị 42 vào địa chỉ (SP + 8)
+
+    ; ... thực hiện logic ...
+
+    ; 3. EPILOGUE: Thu hồi 16 bytes
+    add sp, sp, #16             ; SP = SP + 16 (Dịch đỉnh Stack lên)
+    ret
+```
+
+#### 2. Heap — Thể hiện qua gọi hàm Allocator
+Assembly không tự cấp phát Heap. Nó phải "xin" Hệ điều hành (thông qua `malloc` trong C hoặc `mmap` trong Linux).
+
+```asm
+; --- Ví dụ về Heap (Xin RAM từ OS) ---
+    mov x0, #1024               ; Tham số 1: Xin 1024 bytes
+    bl  malloc                  ; Gọi hàm malloc (Hàm này sẽ xin OS cấp Heap)
+    ; Sau khi gọi, x0 sẽ chứa ĐỊA CHỈ vùng nhớ trên Heap vừa được cấp
+    
+    ; Sử dụng vùng nhớ Heap
+    mov w1, #99
+    str w1, [x0]                ; Ghi số 99 vào đầu vùng nhớ Heap vừa xin được
+```
+
+> [!NOTE]
+> **Tóm tắt:** 
+> - **Static (.text, .data, .bss)**: Do trình biên dịch quy định sẵn địa chỉ hoặc kích thước trong file chạy.
+> - **Dynamic (Stack)**: Do CPU tự quản lý bằng cách tăng/giảm thanh ghi `SP` khi chạy hàm.
+> - **Dynamic (Heap)**: Do code của bạn chủ động gọi các hàm của Hệ điều hành để mượn RAM.
+
+### e. Specialized Segments (Nâng cao)
+
+Ngoài 4 trụ cột chính, thực tế còn có các segment "hậu cần" giúp chương trình chạy được trong môi trường OS phức tạp:
+
+| Segment | Ý nghĩa | Tại sao cần? |
 | :--- | :--- | :--- |
-| `0001` | **MOV** | Bật mạch nối RAM → Registers. |
-| `0010` | **ADD** | Bật mạch **Adder** của ALU. |
-| `0100` | **JMP** | Ghi giá trị mới vào thanh ghi **RIP**. |
+| **.init / .fini** | Khởi tạo / Kết thúc | Chạy các hàm Constructor/Destructor toàn cục trước/sau `main()`. |
+| **.debug** | Debugging Info | Chứa tên biến, số dòng code. Đây là lý do file `.exe` có debug lại nặng hơn file release. |
+| **.plt / .got** | Linker Tables | Phục vụ cho **Dynamic Linking**. Giúp chương trình gọi được hàm từ DLL/SO (như Unity gọi thư viện đồ họa). |
+| **.rel.text** | Relocation | Chứa thông tin để Linker "sửa" lại địa chỉ nếu chương trình được nạp vào vùng nhớ khác. |
 
-### b. CU được xây dựng như thế nào?
-1.  **Hardwired Control (Mạch cứng):** Dùng cổng logic hàn chết. Siêu nhanh (Kiến trúc ARM dùng nhiều).
-2.  **Microprogrammed (Vi chương trình):** Dùng một bộ nhớ nhỏ ROM. Linh hoạt, có thể cập nhật Microcode để sửa lỗi (Kiến trúc Intel x86 dùng cách này).
+> [!NOTE]
+> Khi bạn build Unity sang **C++ (IL2CPP)**, trình biên dịch sẽ tạo ra hàng nghìn file `.cpp`. Kết quả cuối cùng là hàng chục MB dữ liệu nằm rải rác trong các segment này.
 
-### c. Hành trình của một lệnh: ADD EAX, EBX (Deep Walkthrough)
+### f. Interlude: C Language — "High-level Assembly"
 
-Để thực sự nắm được CU làm gì, hãy xem "một ngày của lệnh `ADD EAX, EBX`":
+Bạn có bao giờ thắc mắc tại sao người ta nói ngôn ngữ C rất gần với Assembly không? 
 
-**1. Logical Workflow (Mô hình lý thuyết):**
-*   **Fetch (Lấy lệnh):** CU dùng giá trị trong **RIP** để tìm địa chỉ lệnh trong RAM (.text). Lấy mã máy (ví dụ `0x01D8`) về.
-*   **Decode (Giải mã):** Instruction Decoder nhận ra `0x01` là `ADD`. Nó gửi tín hiệu "Dọn thớt" tới Registers.
-*   **Read Operands:** CU kích hoạt đường dẫn dữ liệu từ thanh ghi `EAX` và `EBX` vào ALU.
-*   **Execute:** CU bật tín hiệu chọn (`Select=000`) cho MUX của ALU để lấy kết quả từ **Bộ Cộng (Adder)**.
-*   **Write Back:** CU kích hoạt tín hiệu "Write Enable" để ghi kết quả từ ALU ngược lại vào `EAX`.
+Thực tế, C được gọi là **"High-level Assembly"** vì:
+1.  **Ánh xạ 1:1**: Hầu hết các lệnh trong C (như `+`, `-`, `&`, `*`) đều ánh xạ trực tiếp xuống 1 hoặc vài lệnh Assembly tương ứng.
+2.  **Quản lý bộ nhớ thủ công**: Giống như Assembly, C cho phép bạn can thiệp trực tiếp vào địa chỉ RAM thông qua **Con trỏ (Pointers)**. Bạn có quyền "đụng chạm" vào `.data`, `.bss`, hay tự xin `.heap` y hệt như đang viết Assembly.
+3.  **Không có "Bảo mẫu"**: Khác với C# có Garbage Collector (GC) tự dọn dẹp RAM, C và Assembly yêu cầu bạn phải tự quản lý từng byte.
 
-**2. Physical Reality (Thực tế Intel/AMD):**
-*   **Front-end (Dịch thuật):** Lệnh x86 `ADD` thực chất là lệnh phức tạp. CPU dịch nó thành một hoặc nhiều **micro-ops** (uOps) đơn giản hơn.
-*   **Dispatch (Phân vai):** Một bộ phận gọi là Scheduler sẽ đẩy uOp này vào một **Execution Port** đang rảnh (ví dụ: Port 1 trên Intel Core i9 có bộ ALU).
-*   **Clock Gating (Tiết kiệm):** Chỉ có mạch dẫn tới bộ Cộng trên Port 1 là nhận xung nhịp (Clock). Các mạch bộ Nhân, bộ Chia trên cùng Port đó bị **ngắt mạch** để không tiêu tốn điện năng vô ích.
-*   **Out-of-Order Execution:** Nếu CPU thấy lệnh tiếp theo không liên quan đến `EAX`, nó có thể chạy lệnh đó **CÙNG LÚC** với lệnh ADD này để tận dụng tối đa phần cứng.
-*   **Retirement:** Kết quả được ghi vào một thanh ghi vật lý ẩn (Physical Register), sau đó mới được "chốt" vào thanh ghi kiến trúc `EAX` của bạn.
+**So sánh sự "gần gũi":**
+- **C#**: Cách xa phần cứng nhất (phải qua Virtual Machine, JIT, GC).
+- **C / C++**: Đứng ngay sát phần cứng. Bạn viết gì, CPU thực thi gần như y hệt.
+- **Assembly**: Chính là phần cứng (dưới dạng chữ viết).
 
-> **Tư duy Logic giúp bạn hiểu LUỒNG đi của dữ liệu. Tư duy Vật lý giúp bạn hiểu tại sao CPU lại NÓNG và tại sao nó NHANH.**
+> [!TIP]
+> **Unity IL2CPP**: Lý do Unity chuyển code C# của bạn sang C++ rồi mới build ra app là để tận dụng tốc độ "gần phần cứng" này. C++ đóng vai trò là "ngôn ngữ trung gian" giúp code của bạn chạy nhanh hơn và khó bị bẻ khóa (reverse engineering) hơn so với C# thuần.
 
-### d. Phân cấp quyền lực: CU (Bộ não) vs ALU (Cơ bắp)
 
-Để trả lời câu hỏi "Ai thực sự là bộ não?", chúng ta có thể chốt lại như sau:
 
-| Bộ phận | Vai trò | Tương đương trong thực tế |
-| :--- | :--- | :--- |
-| **Control Unit (CU)** | **Executive (Điều hành)** | Bếp trưởng / CEO / Bộ não điều khiển. |
-| **ALU** | **Executor (Thực thi)** | Đầu bếp / Công nhân / Máy tính cầm tay. |
 
-**Tại sao phải chia ra như vậy?**
-1.  **Sự chuyên môn hóa:** ALU không cần biết lệnh `ADD` đến từ đâu, nó chỉ cần biết có 2 số đầu vào và nó phải cộng. CU lo toàn bộ việc "hậu cần" (fetch, decode).
-2.  **Khả năng mở rộng (Superscalar):** Trong các CPU hiện đại (Intel/AMD Core i7/i9), một "Bộ não" CU có thể điều khiển **nhiều** "Cơ bắp" ALU cùng lúc. 
-    - Giống như một bếp trưởng chỉ đạo 4-5 đầu bếp nấu ăn song song để phục vụ khách nhanh hơn. 
-    - Nếu không tách CU ra, bạn không thể làm được việc chạy song song (Parallelism) ở mức độ phần cứng này.
 
-> **Hardware Nuance:** Trong kiến trúc hiện đại, CU thậm chí còn thông minh đến mức nhìn trước được tương lai (Branch Prediction). Nó đoán xem lệnh tiếp theo là gì để "chuẩn bị thớt" sẵn cho ALU, giúp ALU không bao giờ phải ngồi chơi xơi nước.
 
----
 
----
 
-## 4. Giải phẫu một câu lệnh (Anatomy)
+## 2. ISA (CISC vs RISC) — Bản hợp đồng Software-Hardware
+
+### 2.1. ISA là gì? (Instruction Set Architecture)
+
+ISA (**Instruction Set Architecture**) là **bản hợp đồng** giữa phần cứng (CPU) và phần mềm (Compiler/OS). Nó định nghĩa:
+- Tập lệnh CPU hiểu được (ADD, MOV, JUMP, ...)
+- Thanh ghi nào có sẵn (RAX, RSP, XMM0, ...)
+- Cách đánh địa chỉ bộ nhớ (Addressing Modes)
+- Kích thước dữ liệu (8/16/32/64-bit)
+
+```
+Tầng abstraction:
+
+  ┌─────────────────────────────────────────────────┐
+  │  C#:  health -= damage;                          │   ← Ngôn ngữ bậc cao
+  ├─────────────────────────────────────────────────┤
+  │  IL:  ldarg.0                                    │   ← Bytecode trung gian
+  │       ldfld float Health::Value                  │
+  │       ldarg.1                                    │
+  │       sub                                        │
+  │       stfld float Health::Value                  │
+  ├─────────────────────────────────────────────────┤
+  │  x86 ASM:                                        │   ← Assembly (1:1 với ISA)
+  │       movss  xmm0, [rcx+0x10]   ; load health   │
+  │       subss  xmm0, xmm1         ; health -= dmg │
+  │       movss  [rcx+0x10], xmm0   ; store back    │
+  ├─────────────────────────────────────────────────┤
+  │  Machine Code:                                   │   ← Nhị phân thuần
+  │       F3 0F 10 41 10                             │
+  │       F3 0F 5C C1                                │
+  │       F3 0F 11 41 10                             │
+  └─────────────────────────────────────────────────┘
+       ↑
+  Mỗi byte → bộ giải mã → tín hiệu điều khiển ALU/FPU/Load-Store Unit.
+```
+
+### 2.2. CISC vs RISC — Hai triết lý thiết kế ISA
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    CISC vs RISC                                     │
+├─────────────────────────┬───────────────────────────────────────────┤
+│        CISC             │            RISC                           │
+│  (Complex Instruction   │    (Reduced Instruction                   │
+│   Set Computer)         │     Set Computer)                         │
+├─────────────────────────┼───────────────────────────────────────────┤
+│ Đại diện: x86-64        │ Đại diện: ARM, RISC-V                    │
+│ Intel, AMD              │ Apple Silicon, Qualcomm                   │
+├─────────────────────────┼───────────────────────────────────────────┤
+│ Lệnh PHỨC TẠP:          │ Lệnh ĐƠN GIẢN:                          │
+│ 1 lệnh có thể làm      │ 1 lệnh chỉ làm 1 việc                   │
+│ nhiều việc cùng lúc     │                                           │
+│                         │                                           │
+│ Ví dụ:                  │ Ví dụ:                                    │
+│ ADD [mem], reg           │ LDR  R1, [mem]    ; Load                │
+│ (Đọc RAM + Cộng +       │ ADD  R1, R1, R2   ; Cộng                │
+│  Ghi lại RAM trong      │ STR  R1, [mem]    ; Ghi                 │
+│  1 lệnh duy nhất)       │ (3 lệnh riêng biệt)                     │
+├─────────────────────────┼───────────────────────────────────────────┤
+│ Kích thước lệnh:        │ Kích thước lệnh:                         │
+│ 1 → 15 bytes (biến đổi)│ 4 bytes CỐ ĐỊNH (ARM)                   │
+│ → Bộ giải mã phức tạp  │ → Bộ giải mã đơn giản, nhanh             │
+├─────────────────────────┼───────────────────────────────────────────┤
+│ Ưu điểm:                │ Ưu điểm:                                  │
+│ ✅ Code compact (ít byte)│ ✅ Pipeline hiệu quả hơn                 │
+│ ✅ Tương thích ngược     │ ✅ Tiết kiệm năng lượng                  │
+│    (chạy code từ 1978)  │ ✅ Dễ tối ưu cho compiler                 │
+├─────────────────────────┼───────────────────────────────────────────┤
+│ Nền tảng:                │ Nền tảng:                                 │
+│ PC, PlayStation, Xbox    │ Mobile, Switch, Mac (M-series)           │
+│ Server                   │ VR Headset (Quest)                       │
+├─────────────────────────┼───────────────────────────────────────────┤
+│ Unity build target:      │ Unity build target:                       │
+│ Windows x64, Linux x64  │ Android ARM64, iOS ARM64                 │
+│ macOS x64 (Intel Mac)   │ macOS ARM64 (Apple Silicon)              │
+└─────────────────────────┴───────────────────────────────────────────┘
+```
+
+> **Thực tế hiện đại:** CPU x86 của Intel/AMD bên ngoài là CISC, nhưng bên trong giải mã thành **micro-ops** (μops) giống RISC rồi mới thực thi. Ranh giới CISC/RISC ngày nay đã mờ đi rất nhiều.
+
+### 2.3. Deep Dive: Micro-ops (uOps) — Cầu nối CISC và RISC
+
+Tại sao Intel/AMD vẫn dùng CISC dù RISC có nhiều ưu điểm? Câu trả lời nằm ở **Micro-ops**.
+
+#### a. Quá trình dịch lệnh (Instruction Translation)
+Khi bạn chạy một lệnh x86 phức tạp, CPU không thực thi nó trực tiếp. Thay vào đó, bộ giải mã (**Decoder**) bẻ nó thành các lệnh nhỏ hơn, đơn giản hơn gọi là **uOps**.
+
+**Ví dụ: Lệnh x86 `ADD [EAX], EBX`** (Cộng EBX vào giá trị tại địa chỉ RAM tro bởi EAX)
+Bộ giải mã sẽ bẻ nó thành 3 uOps:
+1.  **LDR**: Load giá trị từ RAM `[EAX]` vào một thanh ghi tạm ẩn.
+2.  **ADD**: Cộng `EBX` vào thanh ghi tạm đó.
+3.  **STR**: Ghi kết quả từ thanh ghi tạm ngược lại RAM `[EAX]`.
+
+=> Bạn có thấy điều gì không? Bên trong một CPU CISC thực chất là một **"Trái tim RISC"** đang đập!
+
+#### b. uOp Cache — "Phím tắt" siêu tốc
+Việc dịch từ CISC sang uOps tốn thời gian và năng lượng. Để tối ưu, CPU hiện đại có một bộ nhớ đệm gọi là **uOp Cache**:
+- Nếu một lệnh đã được dịch một lần, lần sau CPU lấy thẳng uOp từ cache, bỏ qua bước giải mã.
+- Đây là lý do tại sao các vòng lặp (High-frequency loops) trong C# chạy cực nhanh trên x86.
+
+#### c. Tại sao uOps lại quan trọng cho Hiệu năng?
+1.  **Out-of-Order Execution (OoO)**: Vì uOps rất đơn giản, CPU có thể sắp xếp lại thứ tự chạy của chúng để tận dụng tối đa các bộ phận đang rảnh (Port), miễn là không làm sai kết quả cuối cùng.
+2.  **Superscalar**: CPU có thể thực thi 4-6 uOps **cùng lúc** trong một nhịp clock.
+3.  **Tối ưu hóa năng lượng**: uOps giúp CPU tắt bớt các mạch điện không cần thiết (Clock Gating) dễ dàng hơn so với các lệnh CISC cồng kềnh.
+
+> [!IMPORTANT]
+> **Kết luận:** CISC (x86) giống như một cuốn sách dày được viết bằng ngôn ngữ phức tạp để tiết kiệm giấy (dung lượng file), còn CPU là người thông dịch viên cực kỳ giỏi, tự xé lẻ từng câu ra thành các hành động đơn giản để thực hiện nhanh nhất có thể.
+
+
+
+## 3. Giải phẫu một câu lệnh (Opcode & Operands)
 
 Một dòng Assembly `ADD EAX, EBX` thực chất gồm 2 phần:
 
@@ -133,7 +301,9 @@ Một dòng Assembly `ADD EAX, EBX` thực chất gồm 2 phần:
     *   Số trực tiếp (Immediate) — Ví dụ `10`, `0xFF`.
 
 
-## 5. Addressing Modes (Các cách truy cập bộ nhớ)
+## 4. Các nhóm lệnh cơ bản & Cách truy cập bộ nhớ
+
+### 4.1. Addressing Modes (Các cách truy cập bộ nhớ)
 
 Sức mạnh của Assembly nằm ở chỗ nó linh hoạt trong việc lấy dữ liệu. Hãy xem cú pháp `[]` biến hóa như thế nào:
 
@@ -150,7 +320,7 @@ Sức mạnh của Assembly nằm ở chỗ nó linh hoạt trong việc lấy d
     *   "Bắt đầu từ RBP (mảng), nhảy đi RDI (index) bước, mỗi bước dài 4 bytes (int)".
     *   Đây chính là `array[i]`! CPU tính địa chỉ này trong **1 cycle**.
 
-## 6. The Flags Register (EFLAGS) — Trạng thái ẩn
+### 4.2. The Flags Register (EFLAGS) — Trạng thái ẩn
 
 Khi bạn viết `if (a == b)`, CPU làm gì?
 1.  Nó thực hiện phép trừ giả: `CMP a, b` (thực chất là `a - b` nhưng không lưu kết quả).
@@ -164,7 +334,7 @@ Các cờ (Flag) quan trọng nhất:
 
 Sau đó lệnh `JE` (Jump if Equal) chỉ đơn giản là: "Nếu ZF == 1 thì nhảy".
 
-## 7. 4 Từ vựng cốt lõi
+### 4.3. 4 Từ vựng cốt lõi (MOV, ADD, SUB, JMP)
 
 Bạn chỉ cần nhớ đúng 4 lệnh này để đọc hiểu 90% ví dụ trong sách:
 
@@ -175,7 +345,7 @@ Bạn chỉ cần nhớ đúng 4 lệnh này để đọc hiểu 90% ví dụ tr
 | **SUB** A, B | Trừ B khỏi A, lưu kết quả ở A | `A -= B;` |
 | **JMP** Label | **Nhảy** tới dòng lệnh Label (Jump) | `goto Label;` |
 
-## 8. Ví dụ thực chiến
+## 5. Ví dụ thực chiến: Từ C# sang Assembly
 
 **Code C#:**
 ```csharp
@@ -218,8 +388,6 @@ MOV [c], EAX     ; Store 30 từ EAX vào địa chỉ biến c trong RAM
 
 Silicon (Si) là nguyên tố phổ biến thứ 2 trên vỏ Trái Đất (sau Oxy). Ở trạng thái nguyên chất, nó **gần như không dẫn điện**. Nhưng khi ta "pha tạp" (doping) thêm các nguyên tố khác, nó trở thành vật liệu kỳ diệu: **Có thể chuyển đổi qua lại giữa Dẫn điện và Cách điện.**
 
-> **Tư duy Software:** Hãy coi Silicon như `bool isConducting` có thể thay đổi trạng thái theo ý muốn.
-
 ---
 
 ## 2. MOSFET — Transistor hiện đại
@@ -257,19 +425,7 @@ Tưởng tượng MOSFET như một vòi nước:
 > - Tốc độ đóng mở = Tốc độ CPU (GHz).
 > - Nhiệt tỏa ra = Giới hạn hiệu năng (Thermal Throttling).
 
-### 2.3. Kích thước & Định luật Moore
 
-Kích thước transistor càng nhỏ, ta càng nhét được nhiều "công tắc" vào một chip → Xử lý được lượng dữ liệu khổng lồ cùng lúc.
-
-| Năm | Chip | Kích thước | Số lượng Transistor |
-| :--- | :--- | :--- | :--- |
-| 1971 | Intel 4004 | 10 μm | 2,300 |
-| 2020 | Apple M1 | 5 nm | 16 tỷ |
-| 2024 | Apple M4 | **3 nm** | **28 tỷ** |
-
-> **Quy mô:** Transistor 3nm nhỏ đến mức bạn có thể xếp **26,000 cái** trên bề rộng một sợi tóc.
-
----
 
 ## 3. Từ Transistor → Logic Gates (Cổng Logic)
 
@@ -430,7 +586,6 @@ A OR B       =  NAND(NOT A, NOT B)
 
 Chúng ta thường nghe nói CPU có "bộ não" là ALU. Nhưng bên trong ALU là gì? Thực chất, ALU là tập hợp của nhiều mạch con chuyên biệt được ghép lại.
 
-Cần phân biệt rõ 3 khái niệm:
 1.  **Mạch Tính toán (Arithmetic Circuits):** Xử lý toán học như Cộng, Trừ, Nhân... (Ví dụ: *Adder, Subtractor, Multiplier*).
 2.  **Mạch Logic (Logic Circuits):** Xử lý từng bit như AND, OR, XOR, NOT, Shift... (Ví dụ: *Shifter, Comparator*).
 3.  **ALU (Bộ Số học & Logic):** Là "cỗ máy tổng hợp" bao gồm **CẢ HAI** loại trên + bộ chọn (MUX) để quyết định dùng mạch nào.
@@ -496,16 +651,7 @@ Khi bạn viết `c = a + b;` trong C#:
 ### 4.4. Subtractor — Mạch trừ (Không cần xây mới!)
 
 *   **Tạo từ:** Mạch Adder + cổng **XOR** + 1 bit Carry đầu vào.
-*   **Chức năng:** Tính A - B.
-*   **Bí mật:** CPU **KHÔNG CÓ mạch trừ riêng**. Nó tái sử dụng mạch cộng!
-    *   Quy tắc toán học: `A - B` = `A + (-B)`.
-    *   Trong máy tính (Two's Complement): `-B` = `NOT(B) + 1`.
-    *   Vậy: `A - B` = `A + NOT(B) + 1`.
 
-#### > Code to Hardware: SUB
-Khi bạn viết `health -= damage;`:
-1.  **Assembly:** `SUB EAX, EBX`
-2.  **Hardware:** ALU kích hoạt mạch Adder nhưng đảo ngược `EBX` (XOR) và nhồi số 1 vào Carry đầu tiên. Tiết kiệm diện tích chip vì không cần xây hai mạch riêng!
 
 ---
 
@@ -547,23 +693,7 @@ Nó được ghép từ 3 loại cổng logic cơ bản:
    → Tổng cộng: 1 NOT + 2 AND + 1 OR = Khoảng 12-20 transistors.
 ```
 
-#### b. MUX 4:1 (Chọn 1 trong 4)
-Để chọn 1 trong 4 input, ta cần **2 bit Select** (00, 01, 10, 11).
 
-```text
-    I0 ────┐
-    I1 ────┤    ┌─────────┐
-           ├───►│  MUX    │────► Output
-    I2 ────┤    │  4:1    │
-    I3 ────┘    └────▲────┘
-                     │
-                 Select [1:0]
-
-    S = 00 → Ra I0
-    S = 01 → Ra I1
-    S = 10 → Ra I2
-    S = 11 → Ra I3
-```
 
 #### c. Tại sao MUX là "Trái tim" của ALU?
 
@@ -571,7 +701,7 @@ Trong một ALU thực tế, **TẤT CẢ** các mạch (Adder, Subtractor, AND,
 
 > **Case Study: Lệnh `c = a + b`**
 > 1.  **Logical Level (Tư duy Logic):** 
->     - CPU gửi tín hiệu chọn `000` tới MUX.
+>     - **CU (Control Unit)** gửi tín hiệu chọn `000` tới MUX.
 >     - MUX "mở cổng" cho kết quả từ bộ Cộng và chặn các bộ phận khác. 
 >     - Đây là cách lý tưởng nhất để hiểu về "quyền lựa chọn" của MUX.
 > 
@@ -759,48 +889,8 @@ Bước 6: Kết quả 8 ghi lại vào R1
 → Chỉ là electron chạy qua ~1,300 transistors trong Adder
 ```
 
----
 
-## 6. Kết nối tới Unity — Tại sao điều này quan trọng?
-
-### 6.1. Phép tính trong Shader chính là ALU đang chạy
-
-```csharp
-// Vertex Shader (chạy trên GPU):
-float4 clipPos = mul(UNITY_MATRIX_MVP, vertexPos);
-```
-
-Phép nhân ma trận `mul()` này = **16 phép nhân + 12 phép cộng** `float`.
-Mỗi phép tính `float` sử dụng một **FPU (Floating Point Unit)** — phiên bản ALU cho số thực.
-
-Với 10,000 vertices → GPU thực hiện **280,000 phép tính** chỉ cho bước MVP transform.
-Mỗi phép tính = hàng nghìn transistor đóng/mở trong FPU.
-
-### 6.2. Tại sao NAND quan trọng cho Game Developer?
-
-```
-SSD trong máy bạn = hàng tỷ NAND Gates xếp chồng lên nhau (3D NAND).
-  → Load texture, load scene, streaming assets = đọc từ NAND Flash.
-  → SSD nhanh hơn HDD vì NAND truy cập tức thời (không quay đĩa).
-
-RAM trong máy bạn = hàng tỷ transistors đơn (DRAM).
-  → Mỗi pixel trong RenderTexture = dữ liệu nằm trên DRAM.
-  → GC allocation trong C# = cấp phát thêm vùng DRAM mới.
-```
-
-### 6.3. Tại sao kích thước transistor ảnh hưởng đến game?
-
-| Transistor nhỏ hơn → | Lý do | Hệ quả cho Game |
-| :--- | :--- | :--- |
-| Nhiều transistor hơn/chip | Nhiều ALU hơn, nhiều cores hơn | Chạy được nhiều logic & render phức tạp hơn |
-| Tiêu thụ ít điện hơn | Ít nhiệt → clock speed cao hơn | FPS cao hơn ở cùng TDP |
-| Tốc độ đóng/mở nhanh hơn | Khoảng cách electron di chuyển ngắn hơn | Mỗi clock cycle nhanh hơn |
-
-> **Kết luận Chapter 1:** Mỗi dòng code bạn viết — từ `if (health <= 0)` đến `Shader.SetFloat()` — cuối cùng đều biến thành tín hiệu điện chạy qua hàng tỷ transistor. Hiểu điều này không chỉ là kiến thức lý thuyết, mà là nền tảng để bạn hiểu tại sao **cách tổ chức dữ liệu** (DOD) và **cách viết shader** (branchless) lại ảnh hưởng trực tiếp đến hiệu năng.
-
----
-
-## 7. Mảnh ghép còn thiếu — Kẻ đã quên mình là ai
+## 6. Mảnh ghép còn thiếu — Kẻ đã quên mình là ai
 
 Chúng ta đã xây dựng được ALU — một cỗ máy tính toán siêu việt từ hàng nghìn cổng logic.
 - Nó có thể tính `5000 + 3000` trong nháy mắt.
@@ -819,10 +909,8 @@ Một CPU mà không có bộ nhớ (Memory) thì chỉ là một chiếc máy t
 
 ---
 
-> **Chương tiếp theo:** [Chapter 2 — Memory & Storage: Từ Flip-flop đến RAM]() — Cách transistor tạo ra bộ nhớ, và tại sao Memory Hierarchy là chìa khóa của hiệu năng DOTS.
 
 ---
-*Chapter 1 — Nghiên cứu cho Unity High-Performance Agent*
 # Chương 2: Memory & Storage — Từ Flip-flop đến RAM
 
 > **Mục tiêu chương:** Hiểu cách transistor tạo ra bộ nhớ, tại sao có nhiều tầng bộ nhớ khác nhau (Memory Hierarchy), và tại sao **Cache Locality** là yếu tố quyết định hiệu năng trong Unity DOTS.
@@ -838,22 +926,19 @@ Nhưng bộ não đó có một điểm yếu chết người: **Nó không có 
 
 Hãy tưởng tượng bạn là một đầu bếp thiên tài (CPU), có thể chế biến bất kỳ món ăn nào trong **1 giây**. Nhưng:
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│  ĐẦU BẾP (CPU) cần nguyên liệu (Data):                             │
-│                                                                      │
-│  📋 Bảng ghi chú trước mặt (Registers):    Lấy ngay = 0 giây       │
-│  🧊 Tủ lạnh cạnh bếp (L1 Cache):           Mở lấy  = 2 giây       │
-│  🧊 Tủ lạnh ngoài hành lang (L2 Cache):    Đi lấy  = 5 giây       │
-│  🧊 Kho lạnh tầng hầm (L3 Cache):          Xuống lấy = 15 giây    │
-│  🏪 Siêu thị gần nhà (RAM):                Chạy đi = 3 PHÚT       │
-│  🚚 Nhà kho ngoại thành (SSD):             Gọi giao = 1 GIỜ       │
-│  🚢 Nhập khẩu từ nước ngoài (HDD):         Đợi ship = 1 TUẦN      │
-│                                                                      │
-│  → Đầu bếp (CPU) phải ĐỨNG ĐỢI khi nguyên liệu ở xa.              │
-│    Đây gọi là "Memory Stall" — CPU không làm gì cả, chỉ chờ data.  │
-└──────────────────────────────────────────────────────────────────────┘
-```
+| Thành phần | Ẩn dụ (Vị trí nguyên liệu) | Thời gian tương ứng |
+| :--- | :--- | :--- |
+| 📋 **Registers** | Bảng ghi chú trước mặt | Lấy ngay = **0 giây** |
+| 🧊 **L1 Cache** | Tủ lạnh cạnh bếp | Mở lấy = **2 giây** |
+| 🧊 **L2 Cache** | Tủ lạnh ngoài hành lang | Đi lấy = **5 giây** |
+| 🧊 **L3 Cache** | Kho lạnh tầng hầm | Xuống lấy = **15 giây** |
+| 🏪 **RAM** | Siêu thị gần nhà | Chạy đi = **3 PHÚT** |
+| 🚚 **SSD** | Nhà kho ngoại thành | Gọi giao = **1 GIỜ** |
+| 🚢 **HDD** | Nhập khẩu từ nước ngoài | Đợi ship = **1 TUẦN** |
+
+> [!IMPORTANT]
+> **Memory Stall**: Đầu bếp (CPU) phải **ĐỨNG ĐỢI** khi nguyên liệu ở xa. Lúc này CPU hoàn toàn không làm gì cả, chỉ ngồi chờ dữ liệu đổ về.
+
 
 **Giải pháp của ngành công nghiệp:** Tạo ra nhiều tầng bộ nhớ — nhỏ nhưng nhanh ở gần CPU, lớn nhưng chậm ở xa CPU. Đây là **Memory Hierarchy**.
 
@@ -957,7 +1042,405 @@ Action:   [ Fetch ][ Decode][ Execute ]
      trước đó → SAI NỐT → CPU crash / BSOD / artifact rendering.
 
 
-## 3. Flip-flop — Viên gạch đầu tiên của Bộ nhớ
+## 3. Kiến trúc CPU Core — Nơi mọi thứ hội tụ
+
+### 3.1. Bộ ba trụ cột (ALU - CU - Registers)
+
+Để CPU chạy được, nó cần sự phối hợp nhịp nhàng của 3 bộ phận cốt lõi. Hãy xem bức tranh toàn cảnh (**CPU Datapath**) bên dưới:
+
+```mermaid
+graph LR
+    subgraph RAM_Zone ["Memory Unit (Bộ nhớ chính)"]
+        RAM[("🏪 RAM (Siêu Thị)<br/>External Component")]
+    end
+
+    subgraph CPU_Zone ["CPU Core (Nhà Bếp)"]
+        direction TB
+        
+        %% Components
+        CU[("🧠 Control Unit (CU)<br/>(Bếp Trưởng)")]
+        Regs[("📋 Registers<br/>(Bàn Sơ Chế)")]
+        ALU[("💪 ALU<br/>(Đầu Bếp)")]
+        
+        %% Internal Connections
+        CU --"2. Decode & Control"--> ALU
+        CU -.->|"Control"| Regs
+        Regs == "3. Operands (A, B)" ==> ALU
+        ALU == "4. Result" ==> Regs
+    end
+
+    %% Bus Connections
+    CU --"1. Fetch Instruction"--> RAM
+    RAM --"Data/Instruction"--> CU
+    Regs <==>|"Load/Store"| RAM
+
+    %% Styling
+    style CU fill:#ff9,stroke:#f66,stroke-width:3px
+    style ALU fill:#9f9,stroke:#393,stroke-width:3px
+    style Regs fill:#f9f,stroke:#939,stroke-width:3px
+    style RAM fill:#ccc,stroke:#333,stroke-width:2px
+    
+    classDef bus stroke-width:4px,fill:none,stroke:#666;
+    linkStyle 4,5,6 stroke-width:4px;
+```
+
+> **Quan hệ giữa các thành phần:**
+> Sơ đồ trên cho thấy **Cấu trúc tĩnh (Static Architecture)** của CPU:
+> - **CU ↔ ALU:** Bếp trưởng ra lệnh cho Đầu bếp làm việc.
+> - **RAM ↔ Registers ↔ ALU:** Dữ liệu chảy từ Kho (RAM) vào Bàn sơ chế (Regs) rồi mới vào Nồi (ALU).
+
+#### a. ALU (Arithmetic Logic Unit) — Cỗ máy thực thi
+*   **Phân vai:** Đầu bếp.
+*   **Nhiệm vụ:** Thực hiện các phép tính toán (cộng, trừ, nhân, chia) và so sánh logic (`a > b`).
+*   **Vật lý:** Được xây dựng từ hàng triệu cổng logic (Chương 1).
+*   **Ví dụ:** Khi bạn tính `hp - damage`, ALU chính là mạch điện trực tiếp trừ hai con số đó.
+
+#### b. CU (Control Unit) — Bộ não điều phối
+*   **Phân vai:** Bếp trưởng / Người quản lý.
+*   **Nhiệm vụ:** Đọc mã lệnh (Opcode) từ RAM, giải mã xem lệnh đó là gì, và gửi tín hiệu điện để "bật" ALU hoặc "mở" kho dữ liệu.
+*   **Cơ chế:** Hoạt động như một câu lệnh `switch(opcode)` khổng lồ bằng phần cứng.
+*   **Ví dụ:** Khi thấy lệnh `ADD`, CU sẽ bật tín hiệu "Enable" cho mạch cộng của ALU.
+
+#### c. Registers (MU - Memory Unit) — Kho chứa tạm thời
+*   **Phân vai:** Bàn sơ chế / Thớt.
+*   **Nhiệm vụ:** Lưu trữ dữ liệu và địa chỉ bộ nhớ mà CPU đang cần dùng **ngay lập tức**. Truy cập vào đây nhanh gấp hàng nghìn lần so với RAM.
+
+**Các thanh ghi x86-64 phổ biến:**
+*   **RAX:** Thường chứa kết quả trả về của hàm.
+*   **RIP (Instruction Pointer):** Con trỏ lệnh. Trỏ tới dòng code tiếp theo sẽ chạy.
+*   **RSP (Stack Pointer):** Trỏ tới đỉnh của Stack.
+*   **RDX, RCX, RBX...:** Các thanh ghi đa năng chứa biến tạm.
+
+---
+
+---
+
+### 3.2. Vòng đời Fetch-Decode-Execute (Nhịp tim của máy tính)
+
+Đây là quy trình cơ bản mà CPU thực hiện liên tục từ khi bật máy. Dưới đây là chi tiết từng bước với các thanh ghi chuyên dụng:
+
+*   **PC (Program Counter):** Đếm dòng lệnh (dòng 1, dòng 2...).
+*   **MAR (Memory Address Register):** Chứa ĐỊA CHỈ cần truy cập.
+*   **MDR (Memory Data Register):** Chứa DỮ LIỆU/LỆNH vừa lấy về.
+*   **CIR (Current Instruction Register):** Chứa lệnh ĐANG xử lý.
+*   **ACC (Accumulator):** Thanh ghi chứa kết quả tính toán.
+
+```mermaid
+graph TD
+    subgraph CPU ["CPU Internal"]
+        PC[("Program Counter<br/>(PC)")]
+        MAR[("Memory Address<br/>Register (MAR)")]
+        MDR[("Memory Data<br/>Register (MDR)")]
+        CIR[("Current Instruction<br/>Register (CIR)")]
+        CU[("Control Unit<br/>(Decode)")]
+        ALU[("ALU & ACC<br/>(Execute)")]
+    end
+
+    subgraph Memory_System ["Memory System"]
+        RAM[("RAM")]
+    end
+
+    %% Fetch Phase
+    PC --"1. Copy Address"--> MAR
+    MAR --"2. Address Bus"--> RAM
+    RAM --"3. Data Bus (Instruction)"--> MDR
+    MDR --"4. Copy Instruction"--> CIR
+    PC --"5. Increment (PC++)"--> PC
+    
+    %% Decode Phase
+    CIR --"6. Decode"--> CU
+    
+    %% Execute Phase
+    CU --"7. Control Signals"--> ALU
+    CU --"8. Load/Store"--> MDR
+
+    style CPU fill:#f9f,stroke:#333
+    style RAM fill:#ccc,stroke:#333
+    style CU fill:#ff9,stroke:#f66
+    style ALU fill:#9f9,stroke:#393
+```
+
+#### 1. Fetch (Tìm nạp lệnh)
+1.  **PC** trỏ đến địa chỉ lệnh tiếp theo.
+2.  Copy địa chỉ từ **PC** sang **MAR**.
+3.  Gửi tín hiệu đọc qua **Address Bus** tới RAM.
+4.  RAM trả lại mã lệnh qua **Data Bus** về **MDR**.
+5.  Copy lệnh từ **MDR** sang **CIR** (để giữ an toàn).
+6.  Tăng **PC** lên 1 (chuẩn bị cho lệnh sau).
+
+#### 2. Decode (Giải mã lệnh)
+*   **CU** đọc lệnh trong **CIR**.
+*   Dịch mã nhị phân (ví dụ `1010`) thành ý nghĩa (ví dụ `ADD`).
+
+#### 3. Execute (Thực thi lệnh)
+*   **ALU** tính toán (nếu là lệnh Toán học) → Lưu vào **ACC**.
+*   **Memory** đọc/ghi (nếu là lệnh Load/Store).
+*   **PC** cập nhật địa chỉ mới (nếu là lệnh Jump).
+
+---
+
+### 3.3. Làm sao CPU "hiểu" được lệnh? (Deep Dive: CU)
+
+Làm sao chuỗi bit `0101` lại biến thành hành động vật lý?
+
+#### a. Quá trình giải mã (Decoding)
+CPU có một bảng tra cứu bằng phần cứng (**Instruction Decoder**):
+
+| Opcode (Binary) | Lệnh | CU sẽ làm gì? |
+| :--- | :--- | :--- |
+| `0001` | **MOV** | Bật mạch nối RAM → Registers. |
+| `0010` | **ADD** | Bật mạch **Adder** của ALU. |
+| `0100` | **JMP** | Ghi giá trị mới vào thanh ghi **RIP**. |
+
+#### b. CU được xây dựng như thế nào?
+1.  **Hardwired Control (Mạch cứng):** Dùng cổng logic hàn chết. Siêu nhanh (Kiến trúc ARM dùng nhiều).
+2.  **Microprogrammed (Vi chương trình):** Dùng một bộ nhớ nhỏ ROM. Linh hoạt, có thể cập nhật Microcode để sửa lỗi (Kiến trúc Intel x86 dùng cách này).
+
+#### c. Hành trình của một lệnh: ADD EAX, EBX (Deep Walkthrough)
+
+Để thực sự nắm được CU làm gì, hãy xem "một ngày của lệnh `ADD EAX, EBX`":
+
+**Bí mật của phần cứng (Hardware Implementation):**
+
+Thay vì thực thi trực tiếp, CPU hiện đại sử dụng một "mánh khóe" gọi là **Micro-ops Translation**:
+
+1.  **Instruction Decoder (Bộ giải mã):**
+    *   Khi lệnh `ADD EAX, EBX` đi vào, nó không chạy ngay.
+    *   Decoder sẽ "băm" lệnh này thành các mảnh nhỏ hơn gọi là **Micro-ops (uOps)**.
+
+2.  **Microcode ROM:**
+    *   Bên trong CU có một bộ nhớ tí hon (ROM) chứa "lời giải" cho mọi lệnh.
+    *   Ví dụ: Lệnh `ADD` = `Load A` + `Load B` + `ALU_Add` + `Store Result`.
+
+> **Tại sao phải làm vậy?**
+> Để tương thích ngược! Intel vẫn giữ tập lệnh x86 từ năm 1978 (CISC) để chạy phần mềm cũ, nhưng bên trong lõi phần cứng lại chạy theo kiểu RISC hiện đại (nhanh, đơn giản) thông qua lớp phiên dịch này.
+
+**2. Physical Reality (Thực tế Intel/AMD):**
+*   **Front-end (Dịch thuật):** Lệnh x86 `ADD` thực chất là lệnh phức tạp. CPU dịch nó thành một hoặc nhiều **micro-ops** (uOps) đơn giản hơn.
+*   **Dispatch (Phân vai):** Một bộ phận gọi là Scheduler sẽ đẩy uOp này vào một **Execution Port** đang rảnh (ví dụ: Port 1 trên Intel Core i9 có bộ ALU).
+*   **Clock Gating (Tiết kiệm):** Chỉ có mạch dẫn tới bộ Cộng trên Port 1 là nhận xung nhịp (Clock). Các mạch bộ Nhân, bộ Chia trên cùng Port đó bị **ngắt mạch** để không tiêu tốn điện năng vô ích.
+*   **Out-of-Order Execution:** Nếu CPU thấy lệnh tiếp theo không liên quan đến `EAX`, nó có thể chạy lệnh đó **CÙNG LÚC** với lệnh ADD này để tận dụng tối đa phần cứng.
+*   **Retirement:** Kết quả được ghi vào một thanh ghi vật lý ẩn (Physical Register), sau đó mới được "chốt" vào thanh ghi kiến trúc `EAX` của bạn.
+
+> **Tư duy Logic giúp bạn hiểu LUỒNG đi của dữ liệu. Tư duy Vật lý giúp bạn hiểu tại sao CPU lại NÓNG và tại sao nó NHANH.**
+
+#### d. Phân cấp quyền lực: CU (Bộ não) vs ALU (Cơ bắp)
+
+Để trả lời câu hỏi "Ai thực sự là bộ não?", chúng ta có thể chốt lại như sau:
+
+| Bộ phận | Vai trò | Tương đương trong thực tế |
+| :--- | :--- | :--- |
+| **Control Unit (CU)** | **Executive (Điều hành)** | Bếp trưởng / CEO / Bộ não điều khiển. |
+| **ALU** | **Executor (Thực thi)** | Đầu bếp / Công nhân / Máy tính cầm tay. |
+
+**Tại sao phải chia ra như vậy?**
+1.  **Sự chuyên môn hóa:** ALU không cần biết lệnh `ADD` đến từ đâu, nó chỉ cần biết có 2 số đầu vào và nó phải cộng. CU lo toàn bộ việc "hậu cần" (fetch, decode).
+2.  **Khả năng mở rộng (Superscalar):** Trong các CPU hiện đại (Intel/AMD Core i7/i9), một "Bộ não" CU có thể điều khiển **nhiều** "Cơ bắp" ALU cùng lúc. 
+    - Giống như một bếp trưởng chỉ đạo 4-5 đầu bếp nấu ăn song song để phục vụ khách nhanh hơn. 
+    - Nếu không tách CU ra, bạn không thể làm được việc chạy song song (Parallelism) ở mức độ phần cứng này.
+
+> **Hardware Nuance:** Trong kiến trúc hiện đại, CU thậm chí còn thông minh đến mức nhìn trước được tương lai (Branch Prediction). Nó đoán xem lệnh tiếp theo là gì để "chuẩn bị thớt" sẵn cho ALU, giúp ALU không bao giờ phải ngồi chơi xơi nước.
+
+
+
+## 4. CPU Pipeline — Dây chuyền lắp ráp lệnh
+
+### 4.1. Pipeline cơ bản (5 giai đoạn)
+
+Nếu mỗi lệnh phải hoàn thành tất cả bước trước khi bắt đầu lệnh tiếp, CPU sẽ cực kỳ lãng phí. **Pipeline** giải quyết điều này bằng cách overlap các giai đoạn:
+
+```mermaid
+gantt
+    title So sánh Sequential vs Pipeline
+    dateFormat  X
+    axisFormat %s
+    section Lệnh 1
+    F|D|E|M|W :0, 5
+    section Lệnh 2 (No Pipe)
+    F|D|E|M|W :5, 10
+    section Lệnh 2 (With Pipe)
+    F|D|E|M|W :1, 6
+    section Lệnh 3 (With Pipe)
+    F|D|E|M|W :2, 7
+```
+
+> **Giải thích:** Trong mô hình có Pipeline, khi Lệnh 1 đang bước vào giai đoạn Decode (cycle 2), Lệnh 2 đã bắt đầu Fetch. Các bộ phận CPU luôn bận rộn thay vì ngồi chờ.
+
+#### > Visualizing the Pipeline (Assembly View):
+Giả sử ta có 3 lệnh Assembly liên tiếp: `MOV`, `ADD`, `MOV`.
+
+```mermaid
+graph LR
+    subgraph Cycle_3 ["Trạng thái tại Cycle 3"]
+        direction LR
+        L1[Lệnh 1: EXECUTE]:::exec
+        L2[Lệnh 2: DECODE]:::dec
+        L3[Lệnh 3: FETCH]:::fet
+    end
+
+    classDef exec fill:#f8d7da,stroke:#721c24
+    classDef dec fill:#fff3cd,stroke:#856404
+    classDef fet fill:#d4edda,stroke:#155724
+```
+**Tại cycle 3:**
+*   **ALU** đang bận thực hiện phép tính cho Lệnh 1.
+*   **CU** đang bận giải mã Lệnh 2.
+*   **Bus** đang bận tải Lệnh 3 từ Cache.
+*   → **Cả 3 bộ phận cốt lõi đều làm việc CÙNG LÚC!**
+
+#### Ẩn dụ — Giặt đồ:
+```mermaid
+graph TD
+    subgraph No_Pipeline [Không Pipeline: 270 phút]
+        C1["Cuộn 1: Giặt -> Sấy -> Gấp"] --> C2["Cuộn 2: Giặt -> Sấy -> Gấp"]
+    end
+    subgraph With_Pipeline [Có Pipeline: 150 phút]
+        G1[Cuộn 1 Giặt] --> S1[Cuộn 1 Sấy]
+        S1 --> F1[Cuộn 1 Gấp]
+        G1 -.-> G2[Cuộn 2 Giặt]
+        G2 --> S2[Cuộn 2 Sấy]
+        S1 -.-> S2
+    end
+```
+
+### 4.2. Pipeline hiện đại — Superscalar & Out-of-Order
+
+CPU hiện đại (Zen 5, Intel Core Ultra) có pipeline **19-25 stages** và là **superscalar** (nhiều pipeline chạy song song):
+
+```mermaid
+graph TD
+    subgraph Front_End [FRONT-END: Thu thập & Giải mã]
+        Fetch[① Fetch: Tải lệnh từ L1i] --> Pre[② Pre-decode: Tìm ranh giới]
+        Pre --> Decode[③ Decode: x86 -> μops]
+        Decode --> Rename[④ Rename: Đổi tên Registers]
+    end
+
+    subgraph Back_End [BACK-END: Thực thi Out-of-Order]
+        Rename --> Dispatch[⑤ Dispatch & Schedule]
+        Dispatch --> ALU[Reservation Stations]
+        
+        subgraph Execution_Units [Execution Units]
+            ALU --> E1[ALU #0-3: Số nguyên]
+            ALU --> E2[FPU #0-1: Số thực]
+            ALU --> E3[Load/Store Units]
+        end
+    end
+
+    subgraph Retire [RETIRE: Hoàn tất In-Order]
+        Execution_Units --> ROB[Re-Order Buffer]
+        ROB --> Commit[Ghi kết quả vào Register/Cache]
+    end
+
+    classDef front fill:#e3f2fd,stroke:#1565c0
+    classDef back fill:#fff3e0,stroke:#ef6c00
+    classDef retire fill:#e8f5e9,stroke:#2e7d32
+    class Fetch,Pre,Decode,Rename front
+    class Dispatch,ALU,E1,E2,E3 back
+    class ROB,Commit retire
+```
+
+> **IPC (Instructions Per Cycle):** CPU hiện đại đạt IPC = 4-6 (hoàn thành 4-6 lệnh mỗi clock cycle nhờ superscalar). Đây là lý do tốc độ GHz không phải tất cả — IPC quan trọng không kém.
+
+---
+
+## 5. Pipeline Hazards — Ba kẻ phá hoại Pipeline
+
+Pipeline giúp CPU chạy nhanh, nhưng nó rất dễ bị "tắc đường" bởi 3 kẻ phá hoại sau:
+
+### 5.1. Data Hazard — Phụ thuộc dữ liệu
+**Khái niệm:** Lệnh sau cần kết quả của lệnh trước **ngay lập tức**, nhưng lệnh trước chưa tính xong. CPU buộc phải dừng (Stall) để chờ.
+
+**Ví dụ:**
+```asm
+ADD R1, R2, R3    ; R1 đang được tính (chưa xong)
+SUB R4, R1, R5    ; Cần R1 NGAY LẬP TỨC -> Phải chờ!
+```
+
+> **🌟 Ứng dụng (Programming Takeaway):**
+> Tránh **Dependency Chain** quá dài trong một vòng lặp. Nếu biến `A` phụ thuộc `B`, `B` phụ thuộc `C`... CPU sẽ không thể tận dụng *Out-of-Order Execution* để chạy song song. Hãy viết code độc lập dữ liệu (Data Independence) càng nhiều càng tốt.
+
+### 5.2. Control Hazard — Nhánh rẽ (Branching)
+**Khái niệm:** Khi gặp lệnh `if/else`, CPU không biết nên nạp lệnh nào tiếp theo vào Pipeline. Nó buộc phải "đoán mò" (Branch Prediction). Nếu đoán sai, toàn bộ công sức nạp lệnh trước đó phải đổ bỏ (Flush Pipeline), gây lãng phí lớn (15-20 cycles).
+
+> **Ẩn dụ Nhà Bếp (Kitchen Metaphor):**
+> 
+> Bếp trưởng (CU) thấy một đơn hàng chưa chốt: "Nếu khách là VIP (Điều kiện), làm bò Wagyu. Nếu không, làm bò thường".
+> 
+> *   **Vấn đề:** Để biết khách có phải VIP không, Lễ tân (Execute) phải chạy ra hỏi (tốn thời gian). Bếp không thể ngồi chờ (Stall) được!
+> *   **Branch Prediction:** Bếp trưởng ra lệnh: "Khách tối nay toàn VIP thôi, **nướng sẵn Wagyu đi!**" (Đoán trước).
+>     *   **Đúng:** Khách VIP thật → Có đồ ăn ngay (Hiệu năng cao).
+>     *   **Sai:** Khách thường → **Vứt hết** bò Wagyu đã nướng (Flush Pipeline), lúi húi làm lại bò thường (Tốn kém).
+
+**Ví dụ:**
+```csharp
+if (health > 0) Attack(); // CPU phải đoán: Có lớn hơn 0 không?
+else Die();
+```
+
+
+> **🌟 Ứng dụng (Programming Takeaway):**
+> Hạn chế `if/else` trong các **Hot Loop** (vòng lặp chạy hàng nghìn lần/khung hình).
+> *   **Tốt:** Dùng thuật toán **Branchless** (Bitwise, Math) để loại bỏ `if`.
+> *   **Tốt:** Sắp xếp data để điều kiện `true` tập trung một chỗ, `false` một chỗ (giúp CPU đoán đúng nhiều hơn).
+
+### 5.3. Structural Hazard — Tranh chấp tài nguyên
+**Khái niệm:** Hai lệnh khác nhau muốn sử dụng cùng một bộ phận phần cứng trong cùng một chu kỳ (ví dụ: vừa muốn nạp Lệnh từ RAM, vừa muốn nạp Dữ liệu từ RAM).
+
+**Ví dụ:** Lệnh `MOV EAX, [Address]` đang đọc thụt mạng (Memory Stage), trong khi lệnh tiếp theo đang cố đọc code từ bộ nhớ (Fetch Stage). Cả hai tranh nhau quyền truy cập Cache.
+
+> **🌟 Ứng dụng (Programming Takeaway):**
+> Hiểu được tại sao **Data-Oriented Design (DOD)** tách biệt **Data** và **Logic**:
+> *   CPU có 2 bộ Cache L1 riêng biệt: **L1i (Instruction)** cho Code và **L1d (Data)** cho Biến.
+> *   Việc tách Code (System) và Data (Component) giúp CPU tận dụng tối đa băng thông của cả 2 Cache này song song, không bị tranh chấp. Architecture OOP truyền thống (Data và Logic trộn lẫn trong 1 object) thường gây ra Structural Hazard ngầm.
+
+### 5.4. Ảnh hưởng thực tế trong Unity — Ví dụ Branching
+
+```csharp
+// ═══ Kịch bản: Xử lý 10,000 entities, 50% alive, 50% dead ═══
+
+// --- Code có Branch ---
+[BurstCompile]
+public void Execute(int i)
+{
+    if (healths[i].Value > 0)        // Branch — CPU phải đoán!
+    {
+        positions[i] += velocities[i] * dt;
+        healths[i] -= poisonDamage;
+    }
+    // else: skip (dead entity)
+}
+```
+
+*   **Phân tích:** Nếu 50% alive/dead xếp xen kẽ ngẫu nhiên, CPU sẽ đoán sai liên tục. Mỗi lần đoán sai (Mispredict) tốn ~15-20 cycles. Với 10k entities, con số lãng phí là khổng lồ.
+
+```csharp
+// --- Code Branchless ---
+[BurstCompile]
+public void Execute(int i)
+{
+    // Dùng math.select để thay thế IF
+    // alive = 1.0 (sống) hoặc 0.0 (chết)
+    float alive = math.select(0f, 1f, healths[i].Value > 0);
+
+    // Luôn tính toán cả 2 trường hợp, rồi nhân với 0 hoặc 1
+    positions[i] += velocities[i] * dt * alive;
+    healths[i] -= poisonDamage * alive;
+}
+```
+
+*   **Phân tích:** KHÔNG CÓ NGÃ RẼ → Tàu cứ thế chạy thẳng. Dù phải tính toán "oan" cho các entity đã chết (nhân với 0), nhưng đổi lại Pipeline luôn đầy ắp lệnh và chạy max tốc độ.
+
+
+#### Quy tắc: Khi nào dùng Branch vs Branchless?
+
+| Loại | TỐT KHI | HẠN CHẾ |
+| :--- | :--- | :--- |
+| **Branch (if/else)** | Một nhánh chiếm >90% hoặc khối lượng tính toán ở mỗi nhánh cực lớn. | Gây Stall khi CPU đoán sai (pattern ngẫu nhiên). |
+| **Branchless (select)** | Pattern dữ liệu ngẫu nhiên (50/50), code trong vòng lặp hiệu năng cao (Tight Loop). | CPU luôn phải tính cả hai vế (tốn điện/cycle hơn nếu nhánh bị bỏ qua rất nặng). |
+
+---
+
+## 6. Flip-flop — Viên gạch đầu tiên của Bộ nhớ
 
 ### Bài toán: Làm sao "nhớ" 1 bit?
 
@@ -983,9 +1466,9 @@ Action:   [ Fetch ][ Decode][ Execute ]
 
 ---
 
-## 4. Từ Flip-flop → Register → Register File
+## 7. Từ Flip-flop → Register → Register File
 
-### 4.1. Register — 32 Flip-flops = 1 từ dữ liệu
+### 7.1. Register — 32 Flip-flops = 1 từ dữ liệu
 
 ```mermaid
 graph LR
@@ -1035,9 +1518,9 @@ graph LR
 > - Nhưng chỉ cầm được 2-3 thứ cùng lúc → phải bỏ xuống bàn (Cache) hoặc cất vào tủ (RAM) nếu muốn lấy thứ khác.
 > - Tốc độ: Cầm trên tay > Lấy từ bàn > Đi bộ tới tủ > Chạy ra kho ngoài sân.
 
-### 4.2. Register File — Bộ nhớ "ngay tay" của CPU
+### 7.2. Register File & Register Renaming — "Mặt bàn bếp" của CPU
 
-*(Xem sơ đồ chi tiết vị trí của Register File trong kiến trúc CPU Core tại **Section 7**)*
+*(Xem sơ đồ chi tiết vị trí của Register File trong kiến trúc CPU Core tại **Section 3**)*
 
 **Dòng chảy dữ liệu trong 1 phép tính:**
 
@@ -1067,8 +1550,11 @@ Ví dụ: ADD EAX, EBX  (EAX = EAX + EBX)
   → So sánh: RAM chỉ có 1 cổng, phải đọc rồi mới ghi → chậm hơn.
 ```
 
-**Registers "thật" vs Registers "ảo" — Register Renaming:**
-CPU hiện đại dùng kỹ thuật **Register Renaming** để ánh xạ ~16 thanh ghi logic (EAX, EBX...) sang ~180-200 thanh ghi vật lý bên trong. Điều này cho phép CPU thực thi các lệnh độc lập song song ngay cả khi chúng dùng chung tên thanh ghi cơ bản, phá vỡ các rào cản phụ thuộc dữ liệu (WAW/WAR dependencies).
+**Registers "thật" vs Registers "ảo" — Register Renaming (Nâng cao):**
+CPU hiện đại dùng kỹ thuật **Register Renaming** để ánh xạ ~16 thanh ghi logic (EAX, EBX...) sang một "Pool" vật lý lớn (~180-200 thanh ghi). 
+
+*   **Tại sao cần?** Giúp giải quyết các xung đột tên (Name Dependencies như WAW/WAR).
+*   **Lợi ích:** Cho phép CPU thực thi hàng chục lệnh cùng lúc mà không bị nghẽn bởi số lượng thanh ghi hạn chế của ISA. Nó phá vỡ các rào cản phụ thuộc để CPU có thể chạy Out-of-Order (xáo trộn thứ tự) hiệu quả.
 
 ```
 Register File trong CPU x86-64 (đơn giản hóa):
@@ -1115,9 +1601,9 @@ Register File trong CPU x86-64 (đơn giản hóa):
 
 ---
 
-## 5. SRAM vs DRAM — Hai cách xây bộ nhớ từ Transistor
+## 8. SRAM vs DRAM — Hai cách xây bộ nhớ từ Transistor
 
-### 5.1. SRAM (Static RAM) — Dùng cho Cache
+### 8.1. SRAM (Static RAM) — Dùng cho Cache
 
 ```
 SRAM Cell — 1 bit = 6 Transistors:
@@ -1148,7 +1634,7 @@ SRAM Cell — 1 bit = 6 Transistors:
   → Dùng cho: L1, L2, L3 Cache
 ```
 
-### 5.2. DRAM (Dynamic RAM) — Dùng cho RAM chính
+### 8.2. DRAM (Dynamic RAM) — Dùng cho RAM chính
 
 ```
 DRAM Cell — 1 bit = 1 Transistor + 1 Tụ điện:
@@ -1176,7 +1662,7 @@ DRAM Cell — 1 bit = 1 Transistor + 1 Tụ điện:
   → Dùng cho: RAM chính (DDR4, DDR5)
 ```
 
-### 5.3. So sánh trực quan
+### 8.3. So sánh trực quan
 
 ```
 ┌───────────────────────────────────────────────────────────────────┐
@@ -1200,55 +1686,9 @@ DRAM Cell — 1 bit = 1 Transistor + 1 Tụ điện:
 └───────────────────────────────────────────────────────────────────┘
 ```
 
-### 5.4. Bức tranh toàn cảnh — Flip-flop vs Register vs SRAM vs DRAM
+## 9. Cache — Bộ đệm thay đổi cuộc chơi
 
-> **🎯 Ẩn dụ thống nhất — "Bàn học của Sinh viên":**
->
-> Hãy tưởng tượng bạn đang **ôn thi** trong ký túc xá:
->
-> | Loại bộ nhớ | Ẩn dụ | Ví dụ thực tế |
-> |---|---|---|
-> | **1 Flip-flop** | **1 ô Post-it** — dán 1 chữ số (0 hoặc 1) | Nhớ đúng 1 bit |
-> | **1 Register** | **1 dòng Post-it** — 32 ô dán liền nhau = 1 con số | Nhớ 1 số int (VD: `42`) |
-> | **SRAM (Cache)** | **Mặt bàn học** — vài tờ giấy đang mở, đọc ngay | L1/L2/L3 Cache trên CPU |
-> | **DRAM (RAM)** | **Kệ sách trong phòng** — phải đứng dậy đi lấy | DDR5 RAM 16-64 GB |
-> | *(SSD/HDD)* | **Thư viện downstairs** — phải đi thang máy | Ổ cứng lưu trữ |
->
-> **Điểm mấu chốt:**
-> - Flip-flop → Register → SRAM → DRAM **không phải** 4 thứ khác nhau.
-> - Chúng là **CÙNG 1 ý TƯỞNG** ("nhớ bit") nhưng được **xây khác nhau** để đánh đổi giữa **tốc độ** và **dung lượng**.
-
-```
-Cách xây từ nhỏ → lớn:
-
-  1 Flip-flop = 1 bit nhớ
-       │
-       │ × 32 cái ghép lại
-       ▼
-  1 Register = 32 bits = 1 con số
-       │
-       │  Quá đắt để làm nhiều → dùng mạch SRAM đơn giản hơn
-       ▼
-  SRAM = Bỏ bớt mạch (6 transistor/bit thay vì ~20)
-       │  → Chậm hơn Register nhưng chứa được MB
-       │
-       │  Vẫn quá đắt → thay transistor bằng tụ điện
-       ▼
-  DRAM = 1 transistor + 1 tụ điện / bit
-         → Chậm hơn SRAM nhưng chứa được GB
-         → Phải refresh (tụ rò rỉ) → thêm chậm
-
-
-  Tốc độ:    Register >>>>>>> SRAM >>>>>> DRAM
-  Dung lượng: Register <<<<<<< SRAM <<<<<< DRAM  
-  Giá tiền:   Register $$$$$$$ SRAM $$$$$$ DRAM $
-```
-
----
-
-## 6. Cache — Bộ đệm thay đổi cuộc chơi
-
-### 6.1. Tại sao cần Cache?
+### 9.1. Tại sao cần Cache?
 
 ```
 Tốc độ qua các thế hệ (1980 → nay):
@@ -1286,7 +1726,7 @@ Giải pháp = Cache (Bộ đệm SRAM nằm trên chip CPU):
   └──────────────────┘
 ```
 
-### 6.2. Cache Line — Đơn vị truyền dữ liệu cơ bản
+### 9.2. Cache Line — Đơn vị truyền dữ liệu cơ bản
 
 **Đây là khái niệm QUAN TRỌNG NHẤT cho hiệu năng Unity DOTS.**
 
@@ -1319,14 +1759,7 @@ Hệ quả:
   └──────────────────────────────────────────────────────────────┘
 ```
 
-> **🎯 Ẩn dụ — Kho hàng Amazon:**
-> Cache Line = **Thùng hàng đóng gói sẵn** trong kho Amazon.
-> - Bạn đặt mua **1 cuốn sách** (4 bytes). Amazon không gửi riêng 1 cuốn.
-> - Họ gửi **cả thùng 16 cuốn** cùng chủ đề (64 bytes = 1 Cache Line).
-> - Nếu bạn đọc hết bộ sách theo thứ tự → 15 cuốn sau miễn phí ship! (**Cache Hit**)
-> - Nếu bạn đọc ngẫu nhiên sách từ khắp nơi → mỗi cuốn = 1 thùng hàng mới → phí ship cực đắt! (**Cache Miss**)
-
-### 6.3. Ví dụ thực tế: Cache Hit vs Miss
+### 9.3. Ví dụ thực tế: Cache Hit vs Miss
 
 #### > Under the Hood: Tại sao Random chậm?
 Hãy nhìn vào Assembly của vòng lặp:
@@ -1384,138 +1817,11 @@ Bài toán: Tính tổng 1 triệu số (1,000,000 ints = ~4 MB)
   Tốc độ thực tế: ★☆☆☆☆ CHẬM GẤP 16 LẦN!
 ```
 
-### 6.4. Bảng tốc độ chi tiết — Memory Hierarchy
-
-```mermaid
-graph TD
-    subgraph High_Speed ["Tốc độ cao"]
-        Reg["Registers<br/>0ns"] --- L1["L1 Cache<br/>~1ns"]
-    end
-    
-    subgraph Medium_Speed ["Tự trung bình"]
-        L2["L2 Cache<br/>~3ns"] --- L3["L3 Cache<br/>~10ns"]
-    end
-    
-    subgraph Slow_Speed ["Chậm"]
-        RAM["DDR5 RAM<br/>~50-100ns"] --- SSD["SSD NVMe<br/>~10k ns"] --- HDD["HDD<br/>~5m ns"]
-    end
-
-    L1 --- L2
-    L3 --- RAM
-
-    style Reg fill:#ffcdd2,stroke:#b71c1c
-    style L1 fill:#ffcdd2,stroke:#b71c1c
-    style L2 fill:#fff9c4,stroke:#fbc02d
-    style L3 fill:#fff9c4,stroke:#fbc02d
-    style RAM fill:#e1f5fe,stroke:#0277bd
-    style SSD fill:#e0e0e0,stroke:#616161
-    style HDD fill:#e0e0e0,stroke:#616161
-```
-
-> **Quy tắc vàng:**
-> - Mỗi tầng chậm hơn tầng trên khoảng 3-10×
-> - Mỗi tầng lớn hơn tầng trên khoảng 10-1000×
-
 ---
 
-## 7. Kiến trúc CPU Core — Nơi mọi thứ hội tụ
+## 10. Cache Associativity — Dữ liệu nằm ở đâu trong Cache?
 
-**Register File nằm ở đâu trong CPU?**
-
-```mermaid
-graph TD
-    classDef unit fill:#e1f5fe,stroke:#01579b,stroke-width:2px;
-    classDef storage fill:#fff3e0,stroke:#e65100,stroke-width:2px;
-    classDef memory fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px;
-
-    subgraph CPU_Core ["CPU CORE #0"]
-        direction TB
-
-        subgraph Control_Unit ["★ CU — CONTROL UNIT - Bếp trưởng"]
-            direction TB
-            Fetch[Fetch<br/>Tải lệnh từ L1i]
-            Decoder["Decoder<br/>Giải mã → μops"]
-            Scheduler[Scheduler / Rename<br/>Phân công lệnh]
-            
-            Fetch --> Decoder --> Scheduler
-        end
-        
-        BP["Branch Predictor - Đoán nhánh if-else"] -.-> Fetch
-
-        RF["★★★ REGISTER FILE ★★★<br/>TRUNG TÂM — Mặt bàn bếp"]:::storage
-
-        subgraph Execution_Units [Execution Units - Đầu bếp]
-            direction LR
-            ALU[ALU INT<br/>+, -, logic]:::unit
-            FPU[FPU FLOAT<br/>×, ÷, float]:::unit
-        end
-
-        subgraph Memory_Unit [★ MU — MEMORY UNIT - NV Kho]
-            direction TB
-            Load[Load Unit<br/>Đọc data]
-            Store[Store Unit<br/>Ghi data]
-            TLB[TLB<br/>Cache địa chỉ]
-        end
-
-        Scheduler --> RF
-        Scheduler --> Memory_Unit
-        Scheduler --> Execution_Units
-        
-        RF <==> Execution_Units
-        RF <==> Memory_Unit
-        
-        subgraph L1_Cache [L1 Cache - Tủ lạnh bếp]
-            L1d[L1 Data Cache<br/>32-64 KB<br/>SRAM]:::memory
-        end
-
-        subgraph L2_Cache [L2 Cache - Kho phụ]
-            L2c[L2 Cache<br/>256KB-1MB]:::memory
-        end
-
-        Memory_Unit <==> L1d
-        L1d <==> L2c
-    end
-
-    L3["L3 Cache - Shared - 8-96 MB - Kho tầng hầm"]
-    RAM["DDR5 RAM - 16-64 GB - Siêu thị"]:::memory
-
-    L2c <==> L3
-    L3 <==> RAM
-    
-    class L3 memory
-```
-
-| Thành phần | Vai trò | Ẩn dụ nhà bếp |
-|---|---|---|
-| **CU** | Đọc lệnh, giải mã, phân công | 👨‍🍳 Bếp trưởng |
-| **Register File** | Lưu data đang dùng NGAY | 🍽️ Mặt bàn bếp |
-| **ALU/FPU** | Tính toán (+, -, ×, float) | 🔪 Đầu bếp |
-| **MU** | Lấy/cất data từ Cache/RAM | 📦 Nhân viên kho |
-| **L1 Cache** | Kho nhỏ ngay cạnh bếp | 🧊 Tủ lạnh bếp |
-| **L2 Cache** | Kho dự trữ trong nhà | 🏠 Kho phụ |
-| **L3 Cache** | Kho chung cho tất cả bếp | 🏗️ Kho tầng hầm |
-| **DDR5 RAM** | Kho hàng ngoại vi | 🏪 Siêu thị |
-
-**Dòng chảy lệnh `MOV EAX, [address]`:**
-
-1. **CU** đọc lệnh → "À, cần load data từ bộ nhớ"
-2. **CU** giao cho **MU** (Load Unit) → "Đi lấy data ở địa chỉ này!"
-3. **MU** kiểm tra L1 Cache:
-   - **HIT?** → Trả data ngay (3-4 cycles)
-   - **MISS?** → Hỏi L2 (10 cycles) → L3 (30 cycles) → RAM (200 cycles)
-4. **MU** nhận data → Ghi vào **Register File** (EAX)
-5. **CU** tiếp tục lệnh tiếp theo (ví dụ: `ADD EAX, 5` → gửi EAX tới ALU)
-
-> **Điểm mấu chốt:** Register File nằm **NGAY TRUNG TÂM** CPU Core, cách ALU chỉ vài **micromet** (1 micromet = 1/1000 mm). Tín hiệu điện đi từ Register → ALU → Register trong **cùng 1 clock cycle**. Đây là lý do nó nhanh nhất.
-
-### 7.1. Register Renaming — Tối ưu song song (Nâng cao)
-Như đã đề cập ở **Mục 4.2**, Register Renaming cho phép CPU giải quyết các xung đột tên (Name Dependencies) bằng cách cấp phát các thanh ghi vật lý mới từ một "Pool" chung (~200 thanh ghi). Điều này giúp CPU có thể thực thi hàng chục lệnh cùng lúc mà không bị nghẽn bởi số lượng thanh ghi logic hạn chế của kiến trúc x86.
-
----
-
-## 8. Cache Associativity — Dữ liệu nằm ở đâu trong Cache?
-
-### 8.1. Ba cách tổ chức Cache
+### 10.1. Ba cách tổ chức Cache
 
 #### 1. Direct Mapped (Ánh xạ trực tiếp)
 Mỗi địa chỉ RAM chỉ có THỂ nằm ở **1 vị trí cố định** trong Cache.
@@ -1592,9 +1898,9 @@ graph LR
 
 ---
 
-## 9. Cache Coherency — Vấn đề đa lõi
+## 11. Cache Coherency — Vấn đề đa lõi
 
-### 9.1. False Sharing — "Kẻ thù giấu mặt" của đa luồng
+### 11.1. False Sharing — "Kẻ thù giấu mặt" của đa luồng
 
 ```
 Kịch bản:
@@ -1654,7 +1960,7 @@ struct CountersPadded {
 // → Đặt dữ liệu của mỗi Job trên chunk riêng biệt
 ```
 
-### 9.2. MESI Protocol — Quy ước đồng bộ Cache
+### 11.2. MESI Protocol — Quy ước đồng bộ Cache
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -1682,9 +1988,9 @@ struct CountersPadded {
 
 ---
 
-## 10. Kết nối Unity — Cache Locality là tất cả
+## 12. Kết nối Unity — Cache Locality là tất cả
 
-### 10.1. MonoBehaviour vs ECS — Câu chuyện Cache Line
+### 12.1. MonoBehaviour vs ECS — Câu chuyện Cache Line
 
 **═══ Classic MonoBehaviour (OOP) — Cache NIGHTMARE ═══**
 
@@ -1762,7 +2068,7 @@ Archetype Chunk (16 KB, contiguous):
   → ECS nhanh hơn MonoBehaviour ~10× chỉ nhờ Cache Locality!
 ```
 
-### 10.2. Tại sao NativeArray không có GC?
+### 12.2. Tại sao NativeArray không có GC?
 
 **C# Managed Array** (`new int[]`):
 - Cấp phát trên **Managed Heap**
@@ -1789,7 +2095,7 @@ Archetype Chunk (16 KB, contiguous):
   └─────────────────────────────────────────────────────┘
 ```
 
-### 10.3. Allocator Types — Chọn đúng tầng bộ nhớ
+### 12.3. Allocator Types — Chọn đúng tầng bộ nhớ
 
 | Allocator | Mô tả | Ưu/Nhược | Dùng cho |
 |---|---|---|---|
@@ -1829,7 +2135,3 @@ Chuỗi tiến hóa bộ nhớ:
 
 ---
 
-> **Chương tiếp theo:** [Chapter 3 — CPU, ISA & Programming Languages]() — Cách CPU thực thi lệnh, Pipeline, Branch Prediction, và con đường từ C# → IL → Native Code.
-
----
-*Chapter 2 — Nghiên cứu cho Unity High-Performance Agent*
