@@ -1506,42 +1506,29 @@ BÃ i toÃ¡n: TÃ­nh tá»•ng 1 triá»‡u sá»‘ (1,000,000 ints = ~4 M
 ### 6.4. Báº£ng tá»‘c Ä‘á»™ chi tiáº¿t â€” Memory Hierarchy
 
 ```mermaid
-block-beta
-    columns 1
-    
-    block:HighSpeed
-        registers["Registers<br/>0ns"]
-        l1["L1 Cache<br/>~1ns"]
+graph TD
+    subgraph High_Speed ["Tốc độ cao"]
+        Reg["Registers<br/>0ns"] --- L1["L1 Cache<br/>~1ns"]
     end
     
-    block:MediumSpeed
-        l2["L2 Cache<br/>~3ns"]
-        l3["L3 Cache<br/>~10ns"]
+    subgraph Medium_Speed ["Tự trung bình"]
+        L2["L2 Cache<br/>~3ns"] --- L3["L3 Cache<br/>~10ns"]
     end
     
-    block:MainMemory
-        ram["DDR5 RAM<br/>~50-100ns"]
-    end
-    
-    block:Storage
-        ssd["SSD (NVMe)<br/>~10,000ns"]
-        hdd["HDD<br/>~5,000,000ns"]
+    subgraph Slow_Speed ["Chậm"]
+        RAM["DDR5 RAM<br/>~50-100ns"] --- SSD["SSD NVMe<br/>~10k ns"] --- HDD["HDD<br/>~5m ns"]
     end
 
-    registers --> l1
-    l1 --> l2
-    l2 --> l3
-    l3 --> ram
-    ram --> ssd
-    ssd --> hdd
+    L1 --- L2
+    L3 --- RAM
 
-    style registers fill:#ffcdd2,stroke:#b71c1c
-    style l1 fill:#ffcdd2,stroke:#b71c1c
-    style l2 fill:#fff9c4,stroke:#fbc02d
-    style l3 fill:#fff9c4,stroke:#fbc02d
-    style ram fill:#e1f5fe,stroke:#0277bd
-    style ssd fill:#e0e0e0,stroke:#616161
-    style hdd fill:#e0e0e0,stroke:#616161
+    style Reg fill:#ffcdd2,stroke:#b71c1c
+    style L1 fill:#ffcdd2,stroke:#b71c1c
+    style L2 fill:#fff9c4,stroke:#fbc02d
+    style L3 fill:#fff9c4,stroke:#fbc02d
+    style RAM fill:#e1f5fe,stroke:#0277bd
+    style SSD fill:#e0e0e0,stroke:#616161
+    style HDD fill:#e0e0e0,stroke:#616161
 ```
 
 > **Quy táº¯c vÃ ng:**
@@ -1560,13 +1547,13 @@ graph TD
     classDef storage fill:#fff3e0,stroke:#e65100,stroke-width:2px;
     classDef memory fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px;
 
-    subgraph CPU_Core [CPU CORE #0]
+    subgraph CPU_Core ["CPU CORE #0"]
         direction TB
 
-        subgraph Control_Unit [â˜… CU â€” CONTROL UNIT - Báº¿p trÆ°á»Ÿng]
+        subgraph Control_Unit ["★ CU — CONTROL UNIT - Bếp trưởng"]
             direction TB
             Fetch[Fetch<br/>Táº£i lá»‡nh tá»« L1i]
-            Decoder[Decoder<br/>Giáº£i mÃ£ â†’ Î¼ops]
+            Decoder["Decoder<br/>Giải mã → μops"]
             Scheduler[Scheduler / Rename<br/>PhÃ¢n cÃ´ng lá»‡nh]
             
             Fetch --> Decoder --> Scheduler
@@ -1574,12 +1561,12 @@ graph TD
         
         BP[Branch Predictor<br/>ÄoÃ¡n nhÃ¡nh if/else] -.-> Fetch
 
-        RF[â˜…â˜…â˜… REGISTER FILE â˜…â˜…â˜…<br/>TRUNG TÃ‚M â€” Máº·t bÃ n báº¿p]:::storage
+        RF["★★★ REGISTER FILE ★★★<br/>TRUNG TÂM — Mặt bàn bếp"]:::storage
 
         subgraph Execution_Units [Execution Units - Äáº§u báº¿p]
             direction LR
             ALU[ALU INT<br/>+, -, logic]:::unit
-            FPU[FPU FLOAT<br/>Ã—, Ã·, float]:::unit
+            FPU["FPU FLOAT<br/>×, ÷, float"]:::unit
         end
 
         subgraph Memory_Unit [â˜… MU â€” MEMORY UNIT - NV Kho]
@@ -1608,11 +1595,13 @@ graph TD
         L1d <==> L2c
     end
 
-    L3[L3 Cache (Shared)<br/>8-96 MB<br/>Kho táº§ng háº§m]:::memory
-    RAM[DDR5 RAM<br/>16-64 GB<br/>SiÃªu thá»‹]:::memory
+    L3["L3 Cache - Shared - 8-96 MB - Kho tầng hầm"]
+    RAM["DDR5 RAM - 16-64 GB - Siêu thị"]:::memory
 
     L2c <==> L3
     L3 <==> RAM
+    
+    class L3 memory
 ```
 
 | ThÃ nh pháº§n | Vai trÃ² | áº¨n dá»¥ nhÃ  báº¿p |
@@ -1710,7 +1699,7 @@ graph LR
         B8[Blk 8]:::ram
     end
 
-    subgraph Set0 [Set 0 (4 Ways)]
+    subgraph Set0 ["Set 0 - 4 Ways"]
         direction TB
         W0[Way 0: Blk 0]:::cache
         W1[Way 1: Blk 4]:::cache

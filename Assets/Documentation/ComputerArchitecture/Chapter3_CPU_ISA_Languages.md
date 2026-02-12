@@ -40,21 +40,8 @@ Tầng abstraction:
   Mỗi byte → bộ giải mã → tín hiệu điều khiển ALU/FPU/Load-Store Unit.
 ```
 
-#### > Anatomy of an Instruction (Giải phẫu lệnh):
-Lệnh `ADD EAX, EBX` (01 03) trong x86:
-
-```
-  0000 0001   0000 0011
-  └──┬────┘   └──┬────┘
-    Opcode      ModR/M
-    (ADD)      (EAX, EBX)
-
-  CPU Decoder đọc 2 bytes này → Biết rằng:
-  1. Cần dùng mạch ADDER (Chapter 1).
-  2. Input 1 là Register EAX (Chapter 2).
-  3. Input 2 là Register EBX (Chapter 2).
-  4. Kết quả ghi lại vào EAX.
-```
+#### > Anatomy (Xem lại Chapter 0)
+Cấu trúc lệnh `ADD EAX, EBX` đã được giải thích kỹ ở **Chapter 0**. Trong chương này, ta tập trung vào việc CPU làm gì với nó (Pipeline).
 
 ### 1.2. CISC vs RISC — Hai triết lý thiết kế ISA
 

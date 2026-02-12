@@ -1,26 +1,212 @@
-﻿# Chương 1: Transistor & Logic Gates — Từ Electron đến Tính toán
+﻿
+# Chapter 0: Bảng chữ cái của Máy tính (Assembly Primer)
+
+## 1. Cấu trúc chương trình (.text vs .data) — Deep Dive
+
+Một chương trình khi chạy (Executable) không chỉ là mớ code hỗn độn. Nó được chia thành các **Segments** (ngăn) rõ ràng. Tại sao phải chia? Để bảo vệ code không bị ghi đè, và tối ưu RAM.
+
+### a. Static Segments (Nằm trong file .exe)
+Là những phần được quy định rõ trong code Assembly của bạn.
+
+| Segment | Tên gọi | Chứa gì? | Đặc điểm thú vị | Ví dụ C# |
+| :--- | :--- | :--- | :--- | :--- |
+| **.text** | Code Segment | **Lệnh máy** (Machine Code). | **Read-Only**. Nếu cố ghi vào đây → Crash (Access Violation). | Hàm `void Update() { ... }` |
+| **.data** | Data Segment | **Biến toàn cục/tĩnh** đã khởi tạo khác 0. | Tốn dung lượng file .exe trên đĩa cứng. | `static int score = 100;` |
+| **.rodata**| Read-Only Data | **Hằng số (Const)** và chuỗi ký tự. | Gộp chung strings để tiết kiệm RAM (String Interning). | `const float PI = 3.14f;` <br> `string s = "Hello";` |
+| **.bss** | Uninitialized | Biến tĩnh **chưa** khởi tạo (mặc định 0). | **Magic:** Không tốn chỗ trên đĩa cứng! File .exe chỉ ghi: "Cần 1MB .bss", OS tự cấp 1MB toàn số 0 khi chạy. | `static int connectionId;` <br> `static byte[] buffer = new byte[1000];` |
+
+### b. Runtime Memory (Được OS cấp khi chạy)
+Assembly không có segment `.stack` hay `.heap` (tùy OS/Linker, nhưng về bản chất đây là vùng nhớ động).
+
+| Vùng nhớ | Tên gọi | Chứa gì? | Đặc điểm | Ví dụ C# |
+| :--- | :--- | :--- | :--- | :--- |
+| **Stack** | Stack | Biến cục bộ, tham số hàm. | Lớn ra/thu vào liên tục. Quản lý bởi thanh ghi `RSP`. | `int localVariable = 5;` |
+| **Heap** | Heap | Đối tượng cấp phát động. | Sống cho đến khi GC dọn dẹp. Quản lý bởi OS/Runtime. | `new Enemy();` |
+
+> **Tại sao .bss quan trọng?** Nếu bạn khai báo `static byte[] buffer = new byte[1000000];` (1MB):
+> *   Nếu để trong `.data` (đã khởi tạo): File .exe của bạn sẽ tăng thêm 1MB (chứa toàn số 0).
+> *   Nếu để trong `.bss` (chưa khởi tạo): File .exe **không tăng byte nào**. Window Loader chỉ cần biết "À, cấp cho anh này 1MB số 0" là xong. Tiết kiệm đĩa!
+
+
+
+## 2. Kiến trúc CPU: Bộ ba trụ cột (ALU - CU - Registers)
+
+Để CPU chạy được, nó cần sự phối hợp nhịp nhàng của 3 bộ phận cốt lõi. Hãy tưởng tượng CPU là một **Nhà bếp siêu tốc**:
+
+### a. ALU (Arithmetic Logic Unit) — Cỗ máy thực thi
+*   **Phân vai:** Đầu bếp.
+*   **Nhiệm vụ:** Thực hiện các phép tính toán (cộng, trừ, nhân, chia) và so sánh logic (`a > b`).
+*   **Vật lý:** Được xây dựng từ hàng triệu cổng logic (Chương 1).
+*   **Ví dụ:** Khi bạn tính `hp - damage`, ALU chính là mạch điện trực tiếp trừ hai con số đó.
+
+### b. CU (Control Unit) — Bộ não điều phối
+*   **Phân vai:** Bếp trưởng / Người quản lý.
+*   **Nhiệm vụ:** Đọc mã lệnh (Opcode) từ RAM, giải mã xem lệnh đó là gì, và gửi tín hiệu điện để "bật" ALU hoặc "mở" kho dữ liệu.
+*   **Cơ chế:** Hoạt động như một câu lệnh `switch(opcode)` khổng lồ bằng phần cứng.
+*   **Ví dụ:** Khi thấy lệnh `ADD`, CU sẽ bật tín hiệu "Enable" cho mạch cộng của ALU.
+
+### c. Registers (MU - Memory Unit) — Kho chứa tạm thời
+*   **Phân vai:** Bàn sơ chế / Thớt.
+*   **Nhiệm vụ:** Lưu trữ dữ liệu và địa chỉ bộ nhớ mà CPU đang cần dùng **ngay lập tức**. Truy cập vào đây nhanh gấp hàng nghìn lần so với RAM.
+
+**Các thanh ghi x86-64 phổ biến:**
+*   **RAX:** Thường chứa kết quả trả về của hàm.
+*   **RIP (Instruction Pointer):** Con trỏ lệnh. Trỏ tới dòng code tiếp theo sẽ chạy.
+*   **RSP (Stack Pointer):** Trỏ tới đỉnh của Stack.
+*   **RDX, RCX, RBX...:** Các thanh ghi đa năng chứa biến tạm.
+
+---
+
+## 3. Làm sao CPU "hiểu" được lệnh? (Deep Dive: CU)
+
+Làm sao chuỗi bit `0101` lại biến thành hành động vật lý?
+
+### a. Quá trình giải mã (Decoding)
+CPU có một bảng tra cứu bằng phần cứng (**Instruction Decoder**):
+
+| Opcode (Binary) | Lệnh | CU sẽ làm gì? |
+| :--- | :--- | :--- |
+| `0001` | **MOV** | Bật mạch nối RAM → Registers. |
+| `0010` | **ADD** | Bật mạch **Adder** của ALU. |
+| `0100` | **JMP** | Ghi giá trị mới vào thanh ghi **RIP**. |
+
+### b. CU được xây dựng như thế nào?
+1.  **Hardwired Control (Mạch cứng):** Dùng cổng logic hàn chết. Siêu nhanh (Kiến trúc ARM dùng nhiều).
+2.  **Microprogrammed (Vi chương trình):** Dùng một bộ nhớ nhỏ ROM. Linh hoạt, có thể cập nhật Microcode để sửa lỗi (Kiến trúc Intel x86 dùng cách này).
+
+### c. Hành trình của một lệnh: ADD EAX, EBX (Deep Walkthrough)
+
+Để thực sự nắm được CU làm gì, hãy xem "một ngày của lệnh `ADD EAX, EBX`":
+
+**1. Logical Workflow (Mô hình lý thuyết):**
+*   **Fetch (Lấy lệnh):** CU dùng giá trị trong **RIP** để tìm địa chỉ lệnh trong RAM (.text). Lấy mã máy (ví dụ `0x01D8`) về.
+*   **Decode (Giải mã):** Instruction Decoder nhận ra `0x01` là `ADD`. Nó gửi tín hiệu "Dọn thớt" tới Registers.
+*   **Read Operands:** CU kích hoạt đường dẫn dữ liệu từ thanh ghi `EAX` và `EBX` vào ALU.
+*   **Execute:** CU bật tín hiệu chọn (`Select=000`) cho MUX của ALU để lấy kết quả từ **Bộ Cộng (Adder)**.
+*   **Write Back:** CU kích hoạt tín hiệu "Write Enable" để ghi kết quả từ ALU ngược lại vào `EAX`.
+
+**2. Physical Reality (Thực tế Intel/AMD):**
+*   **Front-end (Dịch thuật):** Lệnh x86 `ADD` thực chất là lệnh phức tạp. CPU dịch nó thành một hoặc nhiều **micro-ops** (uOps) đơn giản hơn.
+*   **Dispatch (Phân vai):** Một bộ phận gọi là Scheduler sẽ đẩy uOp này vào một **Execution Port** đang rảnh (ví dụ: Port 1 trên Intel Core i9 có bộ ALU).
+*   **Clock Gating (Tiết kiệm):** Chỉ có mạch dẫn tới bộ Cộng trên Port 1 là nhận xung nhịp (Clock). Các mạch bộ Nhân, bộ Chia trên cùng Port đó bị **ngắt mạch** để không tiêu tốn điện năng vô ích.
+*   **Out-of-Order Execution:** Nếu CPU thấy lệnh tiếp theo không liên quan đến `EAX`, nó có thể chạy lệnh đó **CÙNG LÚC** với lệnh ADD này để tận dụng tối đa phần cứng.
+*   **Retirement:** Kết quả được ghi vào một thanh ghi vật lý ẩn (Physical Register), sau đó mới được "chốt" vào thanh ghi kiến trúc `EAX` của bạn.
+
+> **Tư duy Logic giúp bạn hiểu LUỒNG đi của dữ liệu. Tư duy Vật lý giúp bạn hiểu tại sao CPU lại NÓNG và tại sao nó NHANH.**
+
+### d. Phân cấp quyền lực: CU (Bộ não) vs ALU (Cơ bắp)
+
+Để trả lời câu hỏi "Ai thực sự là bộ não?", chúng ta có thể chốt lại như sau:
+
+| Bộ phận | Vai trò | Tương đương trong thực tế |
+| :--- | :--- | :--- |
+| **Control Unit (CU)** | **Executive (Điều hành)** | Bếp trưởng / CEO / Bộ não điều khiển. |
+| **ALU** | **Executor (Thực thi)** | Đầu bếp / Công nhân / Máy tính cầm tay. |
+
+**Tại sao phải chia ra như vậy?**
+1.  **Sự chuyên môn hóa:** ALU không cần biết lệnh `ADD` đến từ đâu, nó chỉ cần biết có 2 số đầu vào và nó phải cộng. CU lo toàn bộ việc "hậu cần" (fetch, decode).
+2.  **Khả năng mở rộng (Superscalar):** Trong các CPU hiện đại (Intel/AMD Core i7/i9), một "Bộ não" CU có thể điều khiển **nhiều** "Cơ bắp" ALU cùng lúc. 
+    - Giống như một bếp trưởng chỉ đạo 4-5 đầu bếp nấu ăn song song để phục vụ khách nhanh hơn. 
+    - Nếu không tách CU ra, bạn không thể làm được việc chạy song song (Parallelism) ở mức độ phần cứng này.
+
+> **Hardware Nuance:** Trong kiến trúc hiện đại, CU thậm chí còn thông minh đến mức nhìn trước được tương lai (Branch Prediction). Nó đoán xem lệnh tiếp theo là gì để "chuẩn bị thớt" sẵn cho ALU, giúp ALU không bao giờ phải ngồi chơi xơi nước.
+
+---
+
+---
+
+## 4. Giải phẫu một câu lệnh (Anatomy)
+
+Một dòng Assembly `ADD EAX, EBX` thực chất gồm 2 phần:
+
+```asm
+    ADD      EAX, EBX
+   └─┬─┘    └───┬───┘
+  Opcode     Operands
+(Hành động) (Đối tượng)
+```
+
+1.  **Opcode (Operation Code):** Động từ. Làm gì? (ADD, MOV, SUB).
+2.  **Operands:** Tân ngữ. Làm với ai?
+    *   Thanh ghi (EAX, EBX).
+    *   Bộ nhớ (RAM) — Thường viết trong ngoặc vuông `[0x1234]` hoặc `[EAX]`.
+    *   Số trực tiếp (Immediate) — Ví dụ `10`, `0xFF`.
+
+
+## 5. Addressing Modes (Các cách truy cập bộ nhớ)
+
+Sức mạnh của Assembly nằm ở chỗ nó linh hoạt trong việc lấy dữ liệu. Hãy xem cú pháp `[]` biến hóa như thế nào:
+
+*   **Immediate:** `MOV EAX, 10`
+    *   Không truy cập RAM. Giá trị nằm ngay trong lệnh. Nhanh nhất.
+*   **Direct (Trực tiếp):** `MOV EAX, [0x00403A10]`
+    *   Đến đúng địa chỉ nhà `0x...` lấy đồ. Dùng cho biến `static`.
+*   **Register Indirect (Con trỏ):** `MOV EAX, [RBX]`
+    *   "RBX chứa địa chỉ nào thì đến đó lấy". Tương đương `*pointer` trong C++.
+*   **Register + Offset (Cấu trúc):** `MOV EAX, [RBX + 8]`
+    *   "Đến chỗ RBX trỏ tới, đi thêm 8 bước nữa".
+    *   Dùng để truy cập **Field** của Class/Struct (Ví dụ: `player.health` nằm ở offset 8).
+*   **Base + Index * Scale (Mảng):** `MOV EAX, [RBP + RDI * 4]`
+    *   "Bắt đầu từ RBP (mảng), nhảy đi RDI (index) bước, mỗi bước dài 4 bytes (int)".
+    *   Đây chính là `array[i]`! CPU tính địa chỉ này trong **1 cycle**.
+
+## 6. The Flags Register (EFLAGS) — Trạng thái ẩn
+
+Khi bạn viết `if (a == b)`, CPU làm gì?
+1.  Nó thực hiện phép trừ giả: `CMP a, b` (thực chất là `a - b` nhưng không lưu kết quả).
+2.  Nó cập nhật **Flags Register** dựa trên kết quả phép trừ đó.
+
+Các cờ (Flag) quan trọng nhất:
+*   **ZF (Zero Flag):** Bật lên 1 nếu kết quả = 0. (Tức là `a == b`).
+*   **SF (Sign Flag):** Bật lên 1 nếu kết quả âm. (Tức là `a < b`).
+*   **OF (Overflow Flag):** Bật nếu tính toán bị tràn số (Signed overflow).
+*   **CF (Carry Flag):** Bật nếu tính toán bị nhớ/mượn (Unsigned overflow).
+
+Sau đó lệnh `JE` (Jump if Equal) chỉ đơn giản là: "Nếu ZF == 1 thì nhảy".
+
+## 7. 4 Từ vựng cốt lõi
+
+Bạn chỉ cần nhớ đúng 4 lệnh này để đọc hiểu 90% ví dụ trong sách:
+
+| Lệnh | Ý nghĩa | Ví dụ C# tương đương |
+| :--- | :--- | :--- |
+| **MOV** A, B | **Copy** giá trị từ B sang A (Move) | `A = B;` |
+| **ADD** A, B | Cộng B vào A, lưu kết quả ở A | `A += B;` |
+| **SUB** A, B | Trừ B khỏi A, lưu kết quả ở A | `A -= B;` |
+| **JMP** Label | **Nhảy** tới dòng lệnh Label (Jump) | `goto Label;` |
+
+## 8. Ví dụ thực chiến
+
+**Code C#:**
+```csharp
+int a = 10;
+int b = 20;
+int c = a + b;
+```
+
+**Code Assembly (Dưới lăng kính phần cứng):**
+```asm
+MOV EAX, 10      ; Load 10 vào thanh ghi EAX
+MOV EBX, 20      ; Load 20 vào thanh ghi EBX
+ADD EAX, EBX     ; EAX = EAX + EBX (30)
+MOV [c], EAX     ; Store 30 từ EAX vào địa chỉ biến c trong RAM
+```
+
+> **Bài học:** Một dòng code `int c = a + b` của bạn thực chất là một chuỗi hành động: **Load (Tải lên) → Calculate (Tính) → Store (Cất đi)**.
+
+---
+
+# Chương 1: Transistor & Logic Gates — Từ Electron đến Tính toán
 
 > **Mục tiêu chương:** Hiểu cách một linh kiện vật lý nhỏ bé (transistor) tạo ra nền tảng cho MỌI phép tính trong máy tính — từ phép cộng đơn giản đến việc render hàng triệu polygon trong Unity.
 
 ---
 
-## 1. Tại sao phải bắt đầu từ đây?
 
-Khi bạn viết dòng code C# này trong Unity:
 
-```csharp
-float3 newPosition = currentPosition + velocity * deltaTime;
-```
+## 1. Chất bán dẫn — Vật liệu nền tảng
 
-Bên dưới mọi abstraction layer, phép cộng và nhân đó **thực sự xảy ra** bên trong các mạch transistor vật lý. Không có phép màu — chỉ có electron chạy qua các công tắc bán dẫn, theo quy luật vật lý.
-
-Hiểu điều này giúp bạn trả lời câu hỏi: **"Tại sao cách tôi tổ chức dữ liệu lại ảnh hưởng đến tốc độ?"** — bởi vì mọi thứ cuối cùng đều quay về cách phần cứng xử lý tín hiệu điện.
-
----
-
-## 2. Chất bán dẫn — Vật liệu nền tảng
-
-### 2.1. Ba loại vật liệu dẫn điện
+### 1.1. Ba loại vật liệu dẫn điện
 
 | Loại | Đặc điểm | Ví dụ |
 | :--- | :--- | :--- |
@@ -28,7 +214,7 @@ Hiểu điều này giúp bạn trả lời câu hỏi: **"Tại sao cách tôi 
 | **Cách điện (Insulator)** | Electron bị giữ chặt, không di chuyển | Cao su, Thủy tinh, Nhựa |
 | **Bán dẫn (Semiconductor)** | **Có thể bật/tắt** khả năng dẫn điện | Silicon (Si), Germanium (Ge) |
 
-### 2.2. Silicon — "Đất" của ngành công nghiệp chip
+### 1.2. Silicon — "Đất" của ngành công nghiệp chip
 
 Silicon (Si) là nguyên tố phổ biến thứ 2 trên vỏ Trái Đất (sau Oxy). Ở trạng thái nguyên chất, nó **gần như không dẫn điện**. Nhưng khi ta "pha tạp" (doping) thêm các nguyên tố khác, nó trở thành vật liệu kỳ diệu: **Có thể chuyển đổi qua lại giữa Dẫn điện và Cách điện.**
 
@@ -36,9 +222,9 @@ Silicon (Si) là nguyên tố phổ biến thứ 2 trên vỏ Trái Đất (sau 
 
 ---
 
-## 3. MOSFET — Transistor hiện đại
+## 2. MOSFET — Transistor hiện đại
 
-### 3.1. Mental Model: Công tắc điện tử
+### 2.1. Mental Model: Công tắc điện tử
 
 Đối với Software Engineer, bạn **KHÔNG CẦN QUAN TÂM** đến vật lý lượng tử bên dưới. Hãy hình dung **MOSFET là một công tắc (Switch)** được điều khiển bằng điện áp.
 
@@ -54,7 +240,7 @@ Silicon (Si) là nguyên tố phổ biến thứ 2 trên vỏ Trái Đất (sau 
         └─Switch─┘
 ```
 
-### 3.2. Nguyên lý hoạt động (Vòi nước)
+### 2.2. Nguyên lý hoạt động (Vòi nước)
 
 Tưởng tượng MOSFET như một vòi nước:
 - **Source:** Nguồn nước (Dòng điện).
@@ -71,7 +257,7 @@ Tưởng tượng MOSFET như một vòi nước:
 > - Tốc độ đóng mở = Tốc độ CPU (GHz).
 > - Nhiệt tỏa ra = Giới hạn hiệu năng (Thermal Throttling).
 
-### 3.3. Kích thước & Định luật Moore
+### 2.3. Kích thước & Định luật Moore
 
 Kích thước transistor càng nhỏ, ta càng nhét được nhiều "công tắc" vào một chip → Xử lý được lượng dữ liệu khổng lồ cùng lúc.
 
@@ -85,9 +271,9 @@ Kích thước transistor càng nhỏ, ta càng nhét được nhiều "công t�
 
 ---
 
-## 4. Từ Transistor → Logic Gates (Cổng Logic)
+## 3. Từ Transistor → Logic Gates (Cổng Logic)
 
-### 4.1. Ý tưởng cốt lõi
+### 3.1. Ý tưởng cốt lõi
 
 Một transistor đơn lẻ chỉ là công tắc ON/OFF. Nhưng khi **kết hợp nhiều transistor**, ta tạo ra các **mạch logic** — nền tảng của mọi phép tính.
 
@@ -99,7 +285,7 @@ Kết hợp cả hai → **CMOS (Complementary MOS):** Mạch tiêu thụ điệ
 
 ---
 
-### 4.2. Cổng NOT (Inverter) — Cổng đơn giản nhất
+### 3.2. Cổng NOT (Inverter) — Cổng đơn giản nhất
 
 **Chức năng:** Đảo ngược tín hiệu. Input 0 → Output 1. Input 1 → Output 0.
 
@@ -137,7 +323,7 @@ Bảng chân lý:
 
 ---
 
-### 4.3. Cổng NAND — "Cổng Vạn năng" (Universal Gate)
+### 3.3. Cổng NAND — "Cổng Vạn năng" (Universal Gate)
 
 **Chức năng:** Output = 0 **chỉ khi** cả A VÀ B đều bằng 1. Mọi trường hợp khác = 1.
 
@@ -192,7 +378,7 @@ A OR B       =  NAND(NOT A, NOT B)
 
 ---
 
-### 4.4. Cổng AND, OR, XOR — Bộ công cụ đầy đủ
+### 3.4. Cổng AND, OR, XOR — Bộ công cụ đầy đủ
 
 ```
   ╔════════════════════════════════════════════════════════════════╗
@@ -240,41 +426,34 @@ A OR B       =  NAND(NOT A, NOT B)
 
 ---
 
-## 5. Xây dựng mạch Tính toán — Từ Gates đến ALU
+## 4. Xây dựng mạch Tính toán & ALU (Arithmetic Logic Unit)
 
-### 5.1. Half Adder — Bộ cộng nửa (Cộng 2 bit)
+Chúng ta thường nghe nói CPU có "bộ não" là ALU. Nhưng bên trong ALU là gì? Thực chất, ALU là tập hợp của nhiều mạch con chuyên biệt được ghép lại.
 
-**Bài toán:** Cộng 2 bit (A + B), cho ra kết quả **Sum** (tổng) và **Carry** (nhớ).
+Cần phân biệt rõ 3 khái niệm:
+1.  **Mạch Tính toán (Arithmetic Circuits):** Xử lý toán học như Cộng, Trừ, Nhân... (Ví dụ: *Adder, Subtractor, Multiplier*).
+2.  **Mạch Logic (Logic Circuits):** Xử lý từng bit như AND, OR, XOR, NOT, Shift... (Ví dụ: *Shifter, Comparator*).
+3.  **ALU (Bộ Số học & Logic):** Là "cỗ máy tổng hợp" bao gồm **CẢ HAI** loại trên + bộ chọn (MUX) để quyết định dùng mạch nào.
 
-```
-Ví dụ thực tế (cộng nhị phân):
-   0 + 0 = 00  (Sum=0, Carry=0)
-   0 + 1 = 01  (Sum=1, Carry=0)
-   1 + 0 = 01  (Sum=1, Carry=0)
-   1 + 1 = 10  (Sum=0, Carry=1)    ← "10" nhị phân = 2 thập phân
+Hành trình của chúng ta: Xây dựng từng mạch nhỏ (Adder) → Ghép lại thành ALU hoàn chỉnh.
 
-Nhận xét:
-   Sum  = A XOR B   (Giống nhau → 0, Khác nhau → 1)
-   Carry = A AND B   (Cả hai = 1 → Nhớ 1)
+### 4.1. Half Adder — Bộ cộng nửa
+
+*   **Tạo từ:** 1 cổng **XOR** + 1 cổng **AND**.
+*   **Chức năng:** Cộng 2 bit đơn lẻ (A + B).
+*   **Kết quả:**
+    *   **Sum** (Tổng): A XOR B (Khác nhau thì bằng 1).
+    *   **Carry** (Nhớ): A AND B (Cả hai bằng 1 thì nhớ 1).
 
 
-Sơ đồ mạch:
-          ┌─────────┐
-   A ─────┤         │
-          │   XOR   ├──────── Sum (Bit tổng)
-   B ──┬──┤         │
-       │  └─────────┘
-       │
-       │  ┌─────────┐
-       └──┤         │
-          │   AND   ├──────── Carry (Bit nhớ)
-   A ─────┤         │
-          └─────────┘
 
-Tổng: 1 XOR + 1 AND ≈ 14-18 transistors
-```
+### 4.2. Full Adder — Bộ cộng đầy đủ
 
-### 5.2. Full Adder — Bộ cộng đầy đủ (Cộng 2 bit + Carry trước)
+*   **Tạo từ:** 2 Half Adders + 1 cổng OR.
+*   **Chức năng:** Cộng 3 bit: A + B + **Carry từ bit trước**.
+*   **Tại sao cần?** Để cộng các số nhiều bit (ví dụ bit hàng chục cần nhớ từ hàng đơn vị).
+
+> **Mental Model:** Giống như học sinh tiểu học cộng bài toán: "3 cộng 5 bằng 8, nhớ 1". Full Adder xử lý cái "nhớ 1" đó.
 
 **Bài toán:** Cộng A + B + Cin (bit nhớ từ phép cộng trước đó).
 
@@ -294,180 +473,122 @@ Từ phải sang trái:
   Bit 3: 0+0+1   = 01 → Sum=1, Carry=0        (Full Adder #3)
   Kết quả: 1000 = 8 ✓
 
-
-Sơ đồ Full Adder (= 2 Half Adders + 1 OR):
-              ┌──────────────┐
-   A ─────────┤ Half Adder 1 ├─── S1 ────┐
-   B ─────────┤              ├─── C1 ──┐ │
-              └──────────────┘         │ │
-                                       │ │  ┌──────────────┐
-                                       │ └──┤ Half Adder 2 ├─── Sum (Kết quả)
-   Cin (Carry in) ─────────────────────┘────┤              ├─── C2
-                                            └──────────────┘  │
-                                                              │
-              ┌───────┐                                       │
-   C1 ────────┤  OR   ├──── Cout (Carry out tới bit tiếp)    │
-   C2 ────────┤       │                                       │
-              └───────┘◄──────────────────────────────────────┘
+──────────────────────────────────────┘
 
 Tổng: ~40 transistors cho 1 Full Adder
 ```
 
-### 5.3. Ripple Carry Adder — Cộng số nhiều bit
+### 4.3. Ripple Carry Adder — Mạch cộng đa bít
 
-Để cộng hai số 32-bit, ta nối **32 Full Adders** lại:
-
-```
-32-bit Ripple Carry Adder:
-
-   A[0] B[0]     A[1] B[1]     A[2] B[2]          A[31] B[31]
-     │   │         │   │         │   │               │    │
-   ┌─▼───▼─┐     ┌─▼───▼─┐     ┌─▼───▼─┐          ┌─▼────▼─┐
-   │  FA   │     │  FA   │     │  FA   │   ····   │   FA   │
-   │  #0   │     │  #1   │     │  #2   │          │  #31   │
-   └──┬──┬─┘     └──┬──┬─┘     └──┬──┬─┘          └──┬──┬──┘
-      │  └─Cout──►Cin┘  └─Cout──►Cin┘               │  └─ Overflow?
-    Sum[0]       Sum[1]       Sum[2]              Sum[31]
-
-   Carry "gợn sóng" (ripple) từ phải sang trái.
-   Tổng: 32 × 40 = ~1,280 transistors cho phép cộng 32-bit.
-
-   ⚠ Nhược điểm: Bit cao nhất phải ĐỢI carry từ bit thấp nhất.
-     → Giải pháp: Carry-Lookahead Adder (tính carry song song, nhanh hơn).
-```
+*   **Tạo từ:** Nối tiếp 32 (hoặc 64) cái Full Adder lại với nhau.
+*   **Chức năng:** Cộng hai số nguyên 32-bit (int) hoặc 64-bit (long).
+*   **Cơ chế:** Bit nhớ (Carry) lan truyền từ bit thấp nhất lên bit cao nhất như sóng nước (ripple). CPU hiện đại dùng mạch "Carry Lookahead" để tính song song nhanh hơn.
 
 #### > Code to Hardware: ADD
 Khi bạn viết `c = a + b;` trong C#:
-1.  **Compiler:** Dịch sang Assembly `ADD R1, R2` (cộng giá trị R2 vào R1).
+1.  **Compiler:** Dịch sang Assembly `ADD R1, R2`.
 2.  **Hardware:**
-    *   `R1` và `R2` đưa tín hiệu điện vào 32 cặp input `A` và `B`.
-    *   Tín hiệu lan truyền qua 1,280 transistors trong Ripple Carry Adder.
-    *   Sau ~1 clock cycle, kết quả xuất hiện ở output `Sum` và được ghi lại vào `R1`.
+    *   Tín hiệu điện chạy qua chuỗi 32 Full Adders (~1,280 transistors).
+    *   Sau ~1 clock cycle, kết quả xuất hiện ở output `Sum` và được ghi lại vào Registers.
 
 ---
 
-### 5.4. Subtractor — Mạch trừ (Tái sử dụng Adder!)
+### 4.4. Subtractor — Mạch trừ (Không cần xây mới!)
 
-**Insight quan trọng:** CPU KHÔNG CÓ mạch trừ riêng! Nó DÙNG LẠI mạch cộng.
-
-```
-Cách tính A - B bằng mạch cộng:
-
-  Trong hệ nhị phân có dấu (Two's Complement):
-    -B = NOT(B) + 1    (đảo tất cả bits rồi cộng 1)
-
-  Vậy:
-    A - B = A + (-B) = A + NOT(B) + 1
-                             ↑         ↑
-                          XOR gates   Cin = 1
-
-
-Ví dụ: 5 - 3 = ?
-
-    A    =  0101  (5)
-    B    =  0011  (3)
-    NOT B =  1100
-    +1   → Cin=1
-
-    Thực hiện: 0101 + 1100 + 1 = 10010
-    Bỏ bit tràn → 0010 = 2 ✓
-
-
-Mạch Subtractor = Adder + XOR gates:
-
-   A[0] B[0]     A[1] B[1]     A[2] B[2]          A[31] B[31]
-     │   │         │   │         │   │               │    │
-     │  ┌▼┐        │  ┌▼┐        │  ┌▼┐              │   ┌▼┐
-     │  │X│←SUB    │  │X│←SUB    │  │X│←SUB          │   │X│←SUB
-     │  │O│        │  │O│        │  │O│              │   │O│
-     │  │R│        │  │R│        │  │R│              │   │R│
-     │  └┬┘        │  └┬┘        │  └┬┘              │   └┬┘
-   ┌─▼───▼─┐     ┌─▼───▼─┐     ┌─▼───▼─┐          ┌─▼────▼─┐
-   │  FA   │     │  FA   │     │  FA   │   ····   │   FA   │
-   │  #0   │     │  #1   │     │  #2   │          │  #31   │
-   └──┬──┬─┘     └──┬──┬─┘     └──┬──┬─┘          └──┬──┬──┘
-      │  └─Cout──►Cin┘  └─Cout──►Cin┘               │
-    R[0]          R[1]          R[2]               R[31]
-         ▲
-         │
-   Cin = SUB signal (0 = cộng, 1 = trừ)
-
-   Khi SUB = 0: XOR gates pass B through (B XOR 0 = B), Cin = 0 → A + B
-   Khi SUB = 1: XOR gates flip B (B XOR 1 = NOT B), Cin = 1 → A + NOT(B) + 1 = A - B
-
-   → CÙNG 1 MẠCH VẬT LÝ làm được CẢ cộng VÀ trừ!
-   → Tiết kiệm transistor + diện tích chip → Đây là thiết kế thực tế trong CPU
-```
+*   **Tạo từ:** Mạch Adder + cổng **XOR** + 1 bit Carry đầu vào.
+*   **Chức năng:** Tính A - B.
+*   **Bí mật:** CPU **KHÔNG CÓ mạch trừ riêng**. Nó tái sử dụng mạch cộng!
+    *   Quy tắc toán học: `A - B` = `A + (-B)`.
+    *   Trong máy tính (Two's Complement): `-B` = `NOT(B) + 1`.
+    *   Vậy: `A - B` = `A + NOT(B) + 1`.
 
 #### > Code to Hardware: SUB
 Khi bạn viết `health -= damage;`:
-1.  **Assembly:** `SUB EAX, EBX` (x86) hoặc `SUB R0, R1, R2` (ARM).
-2.  **Hardware:**
-    *   ALU nhận tín hiệu `SUB` (Opcode).
-    *   Tín hiệu này kích hoạt các cổng **XOR** ở đầu vào B để đảo bit (`NOT B`).
-    *   Đồng thời kích hoạt `Cin = 1` vào Full Adder đầu tiên.
-    *   Mạch cộng chạy bình thường → Ra kết quả phép trừ!
-
-> **Kết nối Unity:** Khi Burst compile `a - b`, CPU thực thi lệnh `SUB` — nhưng bên trong ALU, nó chỉ là `ADD` với B được đảo + Cin=1. Cùng mạch cộng ở trên.
+1.  **Assembly:** `SUB EAX, EBX`
+2.  **Hardware:** ALU kích hoạt mạch Adder nhưng đảo ngược `EBX` (XOR) và nhồi số 1 vào Carry đầu tiên. Tiết kiệm diện tích chip vì không cần xây hai mạch riêng!
 
 ---
 
-### 5.5. Multiplexer (MUX) — Bộ chọn tín hiệu
+### 4.5. Multiplexer (MUX) — Bộ chọn tín hiệu (The Decision Maker)
 
-**MUX là "cổng chọn"** — quyết định output lấy từ input nào, dựa trên tín hiệu select.
+Nếu Arithmetic Circuits là "Công nhân", thì MUX chính là "Trưởng phòng" — người quyết định công việc nào được thông qua. 
 
+> **Mental Model: Đường ray tàu hỏa (Train Track Switch)**
+> Tưởng tượng 2 đoàn tàu (Data A và Data B) đang lao tới. Chỉ có 1 đường ray ra (Output).
+> - Cần một cái **Cần gạt (Select Signal)**.
+> - Gạt sang trái: Tàu A đi qua.
+> - Gạt sang phải: Tàu B đi qua.
+> - **MUX chính là cái cần gạt đó.**
+
+#### a. MUX 2:1 (Cơ bản nhất)
+Chọn 1 trong 2 input (I0 hoặc I1) dựa trên 1 bit Select (S).
+
+**Bên trong hộp đen MUX 2:1 có gì?**
+Nó được ghép từ 3 loại cổng logic cơ bản:
+1.  **Cổng NOT:** Để tạo ra tín hiệu đảo của Select.
+2.  **Cổng AND:** Để "lọc" input (Chỉ cho qua khi điều kiện đúng).
+3.  **Cổng OR:** Để gộp kết quả lại.
+
+```text
+       Input 0 (A) ────┐
+                       │    ┌─────────┐
+                       ├───►│  MUX    │────► Output (Y)
+                       │    │  2:1    │
+       Input 1 (B) ────┘    └────▲────┘
+                                 │
+                            Select (S)
+
+   Công thức Logic: Y = (A AND NOT S) OR (B AND S)
+   
+   Giải thích:
+   - Khi S = 0: (NOT S) = 1 → Cổng trên mở (A đi qua), cổng dưới đóng (B bị chặn).
+   - Khi S = 1: (NOT S) = 0 → Cổng trên đóng (A bị chặn), cổng dưới mở (B đi qua).
+   
+   → Tổng cộng: 1 NOT + 2 AND + 1 OR = Khoảng 12-20 transistors.
 ```
-MUX 2:1 (chọn 1 trong 2 inputs):
 
-   I0 ───┐
-         │    ┌─────┐
-         ├────┤ MUX ├──── Y (Output)
-         │    │ 2:1 │
-   I1 ───┘    └──┬──┘
-                 │
-   S ────────────┘ (Select)
+#### b. MUX 4:1 (Chọn 1 trong 4)
+Để chọn 1 trong 4 input, ta cần **2 bit Select** (00, 01, 10, 11).
 
-   Bảng chân lý:
-   ┌───┬───┬───┬────────┐
-   │ S │ I0│ I1│ Y      │
-   ├───┼───┼───┼────────┤
-   │ 0 │ * │ * │ Y = I0 │   ← S=0: chọn input I0
-   │ 1 │ * │ * │ Y = I1 │   ← S=1: chọn input I1
-   └───┴───┴───┴────────┘
+```text
+    I0 ────┐
+    I1 ────┤    ┌─────────┐
+           ├───►│  MUX    │────► Output
+    I2 ────┤    │  4:1    │
+    I3 ────┘    └────▲────┘
+                     │
+                 Select [1:0]
 
-   Công thức: Y = (NOT S AND I0) OR (S AND I1)
-   → Xây từ: 1 NOT + 2 AND + 1 OR = ~12 transistors
-
-
-MUX 4:1 (chọn 1 trong 4 — dùng 2 bit select):
-
-   I0 ──┐
-   I1 ──┤    ┌─────┐
-         ├────┤ MUX ├──── Y
-   I2 ──┤    │ 4:1 │
-   I3 ──┘    └──┬──┘
-                │
-   S[1:0] ──────┘
-
-   S = 00 → Y = I0
-   S = 01 → Y = I1
-   S = 10 → Y = I2
-   S = 11 → Y = I3
-
-
-TẠI SAO MUX QUAN TRỌNG CHO ALU?
-
-   ALU chạy TẤT CẢ mạch tính toán CÙNG LÚC (adder, AND, OR, shift, ...)
-   MUX ở output CHỌN kết quả đúng dựa trên Opcode.
-
-   Ví dụ: ALU nhận Opcode = ADD
-   → Adder, AND unit, OR unit, Shifter... tất cả đều tính
-   → MUX chọn output từ Adder, bỏ qua phần còn lại
-   → Hiệu quả hơn là routing tín hiệu tùy theo lệnh!
-
-   Opcode 2-bit → MUX 4:1 → chọn 1 trong 4 phép tính
-   Opcode 3-bit → MUX 8:1 → chọn 1 trong 8 phép tính
+    S = 00 → Ra I0
+    S = 01 → Ra I1
+    S = 10 → Ra I2
+    S = 11 → Ra I3
 ```
+
+#### c. Tại sao MUX là "Trái tim" của ALU?
+
+Trong một ALU thực tế, **TẤT CẢ** các mạch (Adder, Subtractor, AND, OR...) đều **chạy cùng lúc!**
+
+> **Case Study: Lệnh `c = a + b`**
+> 1.  **Logical Level (Tư duy Logic):** 
+>     - CPU gửi tín hiệu chọn `000` tới MUX.
+>     - MUX "mở cổng" cho kết quả từ bộ Cộng và chặn các bộ phận khác. 
+>     - Đây là cách lý tưởng nhất để hiểu về "quyền lựa chọn" của MUX.
+> 
+> 2.  **Physical Level (Thực tế Intel/AMD - Clock Gating):**
+>     - Nếu CPU hiện đại để *tất cả* mạch chạy cùng lúc, chip sẽ nóng chảy vì lãng phí năng lượng.
+>     - **Clock Gating:** CU (Control Unit) sẽ chỉ gửi xung nhịp (nhịp tim) cho bộ Cộng. Các bộ phận như Nhân (Multiplier) hay Chia (Divider) sẽ bị "ngắt nhịp tim" để không tiêu thụ điện năng.
+>     - **Power Gating:** Ở các đơn vị lớn hơn (như AVX-512), CPU thậm chí ngắt hẳn nguồn điện nếu không dùng tới.
+> 
+> **Kết luận:** MUX là "người đưa ra quyết định" cuối cùng về mặt dữ liệu, nhưng **Clock Gating** mới là "người tiết kiệm điện" thực sự trong các CPU hiện đại của Intel và AMD.
+
+#### > Code to Hardware: Toán tử `? :` và `if`
+Khi bạn viết:
+```csharp
+int result = condition ? a : b;
+```
+Trình biên dịch sẽ cố gắng biến nó thành một lệnh **CMOV (Conditional Move)** — sử dụng MUX phần cứng để chọn A hoặc B mà **không cần rẽ nhánh (branching)**. Cực kỳ nhanh!
+
 
 #### > Code to Hardware: Conditional Move
 Khi bạn dùng `math.select(a, b, condition)` trong Burst:
@@ -479,7 +600,16 @@ Khi bạn dùng `math.select(a, b, condition)` trong Burst:
 
 ---
 
-### 5.6. Shifter — Mạch dịch bit
+### 4.6. Shifter — Mạch dịch bit
+
+*   **Tạo từ:** Hàng loạt **MUX** (Bộ chọn) xếp tầng.
+*   **Chức năng:** Dịch các bit sang trái hoặc phải.
+    *   Dịch trái (`<<`) = Nhân 2.
+    *   Dịch phải (`>>`) = Chia 2.
+*   **Barrel Shifter:** Thiết kế thông minh dùng MUX chia tầng, cho phép dịch `n` bit bất kỳ chỉ trong **1 Clock Cycle** (thay vì dịch từng bước).
+
+#### > Code to Hardware: Bitwise Shift
+Trong Unity, `transform.position * 2` thường chậm hơn chút xíu so với `x << 1` (về lý thuyết), nhưng compiler hiện đại đã tự tối ưu việc này. Tuy nhiên, trong **Bitmask/LayerMask**, shifter hoạt động liên tục!
 
 **Shifter dịch tất cả bits sang trái hoặc phải.** Dịch trái 1 bit = nhân 2, dịch phải 1 bit = chia 2.
 
@@ -547,150 +677,30 @@ Barrel Shifter — Dịch N bit trong 1 clock cycle:
 
 ---
 
-### 5.7. Multiplier — Mạch nhân (Shift-and-Add)
+### 4.7. Multiplier — Mạch nhân
 
-**Nhân chỉ là cộng lặp lại** — nhưng thông minh hơn: shift-and-add.
-
-```
-Nhân nhị phân giống nhân thập phân trên giấy:
-
-   Ví dụ: 0101 × 0011 (5 × 3):
-
-         0 1 0 1    (A = 5)
-       × 0 0 1 1    (B = 3)
-       ──────────
-         0 1 0 1    ← A × B[0] = A × 1 = A          (không shift)
-       0 1 0 1 0    ← A × B[1] = A × 1 = A << 1     (shift trái 1)
-     0 0 0 0 0 0    ← A × B[2] = A × 0 = 0           (skip)
-   0 0 0 0 0 0 0    ← A × B[3] = A × 0 = 0           (skip)
-   ──────────────
-     0 0 0 1 1 1 1  = 15 ✓
-
-   Quy tắc:
-   - Nếu bit B[i] = 1: Cộng A đã shift trái i bit
-   - Nếu bit B[i] = 0: Bỏ qua (cộng 0)
-   - Tổng tất cả partial products = kết quả
-
-
-Mạch Multiplier 4-bit:
-
-   A[3:0]    B[3:0]
-     │          │
-     │    ┌─────┴─────┐
-     │    │ B[0]=1?   │ → Partial Product 0 = A[3:0] AND B[0]
-     │    │ B[1]=1?   │ → Partial Product 1 = (A[3:0] AND B[1]) << 1
-     │    │ B[2]=1?   │ → Partial Product 2 = (A[3:0] AND B[2]) << 2
-     │    │ B[3]=1?   │ → Partial Product 3 = (A[3:0] AND B[3]) << 3
-     │    └───────────┘
-     │         │
-     │    ┌────▼────┐
-     │    │  Adder  │  ← Cộng tất cả partial products
-     │    │  Tree   │    (Wallace Tree hoặc Dadda Tree)
-     │    └────┬────┘
-     │         │
-          Result[7:0]  ← Kết quả 8-bit (4-bit × 4-bit = tối đa 8-bit)
-
-
-   ● "B[i] AND A" = 4 AND gates (mỗi bit) → quyết định cộng A hay 0
-   ● Partial products cộng bằng Adder tree
-   ● Kết quả: width gấp đôi (4-bit × 4-bit = 8-bit, 32×32 = 64-bit)
-   ● Transistor count: Multiplier 32-bit = ~30,000-50,000 transistors
-     (ĐẮT hơn nhiều so với Adder ~1,300!)
-
-
-Wallace Tree — Cộng nhanh partial products:
-
-   Thay vì cộng tuần tự (P0+P1, rồi +P2, rồi +P3...):
-   → Wallace Tree cộng SONG SONG bằng cách dùng Full Adders liên tầng
-
-   Tầng 1: Nhóm 3 partial products → FA → giảm xuống 2 dòng
-   Tầng 2: Nhóm tiếp → giảm tiếp
-   ...
-   Tầng cuối: 1 phép cộng cuối cùng
-
-   → Thay vì O(N) tầng cộng tuần tự → O(log N) tầng!
-   → Multiplier 32-bit hoàn thành trong ~3-4 clock cycles thay vì ~32
-```
+*   **Cơ chế:** "Shift-and-Add" (Nhân nhị phân giống nhân trên giấy).
+*   **Đặc điểm:** Phức tạp (~30,000+ transistors) và chậm hơn (3-5 cycles). CPU hiện đại dùng **Wallace Tree** để cộng song song các kết quả trung gian, giảm thời gian chờ.
 
 #### > Code to Hardware: MUL / IMUL
-1.  **C#:** `float3 c = a * b;`
-2.  **Assembly (Burst AVX):** `VMULPS YMM0, YMM1, YMM2`
-3.  **Hardware:**
-    *   Lệnh này kích hoạt **8 bộ nhân FPU** chạy song song (vì YMM là 256-bit chứa 8 floats).
-    *   Mỗi bộ nhân tiêu tốn khoảng 3-5 clock cycles (latency) nhưng có thể pipelined (throughput 0.5-1 cycle).
-
-> **Kết nối Unity:** Mỗi `float3 result = a * b` trong Burst Job = 3 phép nhân float. Mỗi phép nhân chạy qua FPU Multiplier (~50,000 transistors). SIMD AVX2: `VMULPS ymm0, ymm1, ymm2` = 8 phép nhân song song — 8 multiplier units chạy cùng lúc!
+Mỗi lệnh `float3 a * b` trong Burst Job kích hoạt bộ **FPU Multiplier**. Với SIMD (AVX2), CPU có thể chạy 8 bộ nhân song song (`VMULPS`), thực hiện hàng tỷ phép tính mỗi giây cho game.
 
 ---
 
-### 5.8. Comparator — Mạch so sánh
+### 4.8. Comparator — Mạch so sánh
 
-**So sánh A và B** → xuất ra flags: A==B? A>B? A<B?
+*   **Cơ chế:** So sánh A và B bằng mạch trừ (A - B) nhưng chỉ giữ lại các **Flags** (ZF, SF...).
+*   **Ứng dụng:** Dùng cho mọi câu lệnh `if`, `for`, `while`.
 
-```
-So sánh 1 bit (A vs B):
-
-   A == B:  NOT(A XOR B)     ← XOR = khác nhau → NOT → giống nhau!
-   A > B:   A AND (NOT B)    ← A=1 và B=0 → A lớn hơn
-   A < B:   (NOT A) AND B    ← A=0 và B=1 → A nhỏ hơn
-
-
-So sánh nhiều bit — Từ bit cao nhất xuống:
-
-   Ví dụ: A = 0110 (6), B = 0100 (4)
-
-   Bit 3: A[3]=0, B[3]=0 → Bằng → Xét bit tiếp
-   Bit 2: A[2]=1, B[2]=1 → Bằng → Xét bit tiếp
-   Bit 1: A[1]=1, B[1]=0 → A > B → DỪNG! Kết quả: A > B ✓
-
-
-Mạch Comparator 4-bit (cascade):
-
-   A[3] B[3]     A[2] B[2]     A[1] B[1]     A[0] B[0]
-     │   │         │   │         │   │         │   │
-   ┌─▼───▼─┐     ┌─▼───▼─┐     ┌─▼───▼─┐     ┌─▼───▼─┐
-   │ 1-bit │     │ 1-bit │     │ 1-bit │     │ 1-bit │
-   │ Comp  │     │ Comp  │     │ Comp  │     │ Comp  │
-   │ #3    │     │ #2    │     │ #1    │     │ #0    │
-   └───┬───┘     └───┬───┘     └───┬───┘     └───┬───┘
-       │ EQ,GT,LT    │             │             │
-       └──priority──►└──priority──►└──priority──►└──► Flags
-                                                       │
-                                                  Zero (A==B)
-                                                  Negative (A<B)
-                                                  Carry (A>B)
-
-   Output → CPU Flags Register:
-   ┌──────────────────────────────────────────────────┐
-   │  Z (Zero)    = 1 nếu A == B                     │
-   │  N (Negative)= 1 nếu A < B (kết quả A-B < 0)   │
-   │  C (Carry)   = 1 nếu A > B (overflow khi trừ)   │
-   └──────────────────────────────────────────────────┘
-
-   CPU dùng flags này cho "branch instructions":
-     CMP R1, R2     → Subtractor: R1 - R2, ghi flags
-     JE  label      → Nhảy nếu Z=1 (Jump if Equal)
-     JG  label      → Nhảy nếu Z=0 AND N=0 (Jump if Greater)
-     JL  label      → Nhảy nếu N=1 (Jump if Less)
-```
-
-#### > Code to Hardware: CMP + JUMP
-1.  **C#:** `if (health <= 0) Die();`
-2.  **Assembly:**
-    ```asm
-    CMP  EAX, 0      ; So sánh EAX (health) với 0 -> Mạch Comparator chạy
-    JLE  Label_Die   ; Jump if Less or Equal (Kiểm tra Flag Z=1 hoặc N=1)
-    ```
-3.  **Hardware:**
-    *   `CMP` thực chất là phép trừ `health - 0` mà **bỏ qua kết quả**, chỉ giữ lại Flags.
-    *   Nếu `health=0`, kết quả trừ = 0 → Flag Z bật lên 1.
-    *   Lệnh `JLE` chỉ nhìn vào Flag Z và N để quyết định nạp lệnh tiếp theo từ đâu.
-
-> **Kết nối Unity:** Mỗi `if (health <= 0)` trong C# → Burst/IL2CPP compile thành `CMP` + `JLE`. `CMP` = mạch Subtractor (tính `health - 0`) + ghi flags. `JLE` = kiểm tra flags Z hoặc N. Branch prediction (Chapter 3) dự đoán kết quả flags TRƯỚC KHI comparator hoàn thành!
+#### > Code to Hardware: IF
+Khi bạn viết `if (health <= 0) Die();`:
+1.  **CMP EAX, 0:** Chạy mạch Comparator (thực chất là trừ `health - 0`).
+2.  **FLAGS:** Nếu kết quả = 0, cờ **ZF (Zero Flag)** bật lên 1. Nếu âm, cờ **SF (Sign Flag)** bật lên 1.
+3.  **JLE:** Lệnh nhảy này chỉ kiểm tra Flags để quyết định nạp code từ hướng nào.
 
 ---
 
-### 5.9. ALU (Arithmetic Logic Unit) — Bộ não hoàn chỉnh
+### 4.9. ALU (Arithmetic Logic Unit) — Bộ não hoàn chỉnh
 
 Bây giờ ta thấy ALU = **ghép TẤT CẢ mạch trên bằng MUX**:
 
@@ -945,9 +955,7 @@ Action:   [ Fetch ][ Decode][ Execute ]
   → Đây là lý do "overclock" (tăng GHz) nguy hiểm:
      Nếu nhạc trưởng đánh quá nhanh, nhạc công chưa kịp đánh nốt
      trước đó → SAI NỐT → CPU crash / BSOD / artifact rendering.
-```
 
----
 
 ## 3. Flip-flop — Viên gạch đầu tiên của Bộ nhớ
 
@@ -966,10 +974,10 @@ Action:   [ Fetch ][ Decode][ Execute ]
 **Chỉ cần nhớ 3 điều về Flip-flop:**
 
 | # | Điều cần nhớ | Chi tiết |
-|---|---|---|
-| 1 | **Nhớ đúng 1 bit** (0 hoặc 1) | Được xây từ ~2 cổng logic + feedback loop |
-| 2 | **Chỉ thay đổi khi Clock "tick"** | Giống máy ảnh: chỉ "chụp" dữ liệu tại đúng nhịp Clock ↑ |
-| 3 | **Là nền tảng của MỌI bộ nhớ** | Register, Cache, RAM — tất cả đều bắt nguồn từ nguyên lý này |
+| :--- | :--- | :--- |
+| **1** | **Nhớ đúng 1 bit** (0 hoặc 1) | Được xây từ ~2 cổng logic + feedback loop. |
+| **2** | **Chỉ thay đổi khi Clock "tick"** | Giống máy ảnh: chỉ "chụp" dữ liệu tại đúng nhịp Clock ↑. |
+| **3** | **Là nền tảng của MỌI bộ nhớ** | Register, Cache, RAM — tất cả bắt nguồn từ nguyên lý này. |
 
 > Chỉ từ ~8 transistors, ta tạo ra thứ có thể **NHỚ**. Mọi bộ nhớ trên thế giới — từ Register trong CPU đến thanh RAM 64GB — đều bắt nguồn từ nguyên lý feedback loop này.
 
@@ -980,38 +988,33 @@ Action:   [ Fetch ][ Decode][ Execute ]
 ### 4.1. Register — 32 Flip-flops = 1 từ dữ liệu
 
 ```mermaid
-block-beta
-    columns 7
-    d31["D-FF<br/>#31"]
-    d30["D-FF<br/>#30"]
-    d29["D-FF<br/>#29"]
-    d28["D-FF<br/>#28"]
-    space["..."]
-    d1["D-FF<br/>#1"]
-    d0["D-FF<br/>#0"]
+graph LR
+    subgraph Register_32bit ["Thanh ghi 32-bit"]
+        direction LR
+        FF31["D-FF #31"] --- FF30["D-FF #30"] --- FF29["D-FF #29"] --- dots[...] --- FF1["D-FF #1"] --- FF0["D-FF #0"]
+    end
 
-    clk(("CLOCK"))
-    
-    clk --> d31
-    clk --> d30
-    clk --> d29
-    clk --> d28
-    clk --> d1
-    clk --> d0
+    Clock((CLOCK))
+    Clock -.-> FF31
+    Clock -.-> FF30
+    Clock -.-> FF29
+    Clock -.-> FF1
+    Clock -.-> FF0
 
-    style d31 fill:#f9fbe7,stroke:#827717
-    style d30 fill:#f9fbe7,stroke:#827717
-    style d29 fill:#f9fbe7,stroke:#827717
-    style d28 fill:#f9fbe7,stroke:#827717
-    style d1 fill:#f9fbe7,stroke:#827717
-    style d0 fill:#f9fbe7,stroke:#827717
-    style clk fill:#ffecb3,stroke:#ff6f00
+    style FF31 fill:#f9fbe7,stroke:#827717
+    style FF30 fill:#f9fbe7,stroke:#827717
+    style FF29 fill:#f9fbe7,stroke:#827717
+    style FF1 fill:#f9fbe7,stroke:#827717
+    style FF0 fill:#f9fbe7,stroke:#827717
+    style Clock fill:#ffecb3,stroke:#ff6f00
+    style dots fill:none,stroke:none
 ```
 
-> **Cơ chế:**
-> - Tất cả 32 flip-flops nhận **CÙNG** tín hiệu Clock.
-> - Khi Clock ↑ (cạnh lên): Cả 32 bit được ghi **ĐỒNG THỜI**.
-> - → Ghi một số `int` 32-bit chỉ mất **1 clock cycle**.
+**Cơ chế hoạt động:**
+*   **Đồng bộ:** Tất cả 32 flip-flops nhận CÙNG một tín hiệu Clock.
+*   **Tức thì:** Khi Clock ↑ (cạnh lên), cả 32 bit được ghi ĐỒNG THỜI.
+*   **Hiệu năng:** Ghi một số nguyên `int` 32-bit chỉ tốn đúng **1 clock cycle**.
+
 #### > Code to Hardware: MOV
 1.  **C#:** `int x = 42;`
 2.  **Assembly:** `MOV EAX, 42`
@@ -1024,12 +1027,6 @@ block-beta
 *   `MOV EAX, EBX` (Register to Register): **0.2 ns** (ngay lập tức).
 *   `MOV EAX, [EBX]` (RAM to Register): **100 ns** (phải đợi tín hiệu đi ra mainboard và quay lại!).
 
-
-Ví dụ cụ thể:
-  Số nguyên 42 = 00000000 00000000 00000000 00101010
-  → 32 flip-flops lưu:
-     FF#31=0, FF#30=0, ... FF#5=1, FF#4=0, FF#3=1, FF#2=0, FF#1=1, FF#0=0
-```
 
 > **🎯 Ẩn dụ — Bàn tay của Đầu bếp:**
 > Register = **MÓN ĐỒ ĐANG CẦM TRÊN TAY** đầu bếp.
@@ -1071,42 +1068,7 @@ Ví dụ: ADD EAX, EBX  (EAX = EAX + EBX)
 ```
 
 **Registers "thật" vs Registers "ảo" — Register Renaming:**
-
-```
-Bạn NHÌN THẤY 16 registers (RAX, RBX, ..., R15) trong Assembly.
-Nhưng CPU THẬT SỰ có ~180-200 registers vật lý bên trong!
-
-Tại sao? Để chạy Out-of-Order (xáo trộn thứ tự lệnh):
-
-  Ví dụ 2 lệnh ĐỘC LẬP nhưng dùng CÙNG thanh ghi:
-  ──────────────────────────────────────────────────
-  Lệnh 1:  ADD  EAX, 5       ; EAX = EAX + 5
-  Lệnh 2:  MOV  EAX, [mem]   ; EAX = giá trị từ RAM ← CÙNG EAX!
-
-  Vấn đề: Lệnh 2 GHI ĐÈ lên EAX, nhưng lệnh 1 cũng cần EAX.
-  → CPU không thể chạy song song!
-
-  Giải pháp — Register Renaming:
-  ──────────────────────────────
-  CPU đổi tên bên trong:
-  Lệnh 1:  ADD  P47, 5       ; EAX → mapped sang Physical Register #47
-  Lệnh 2:  MOV  P92, [mem]   ; EAX → mapped sang Physical Register #92
-
-  → Bây giờ 2 lệnh KHÔNG ĐỤNG NHAU → chạy song song được!
-  → Programmer vẫn thấy "EAX" — nhưng bên trong là registers khác nhau.
-
-  ┌─────────────────────────────────────────────────────────────┐
-  │  Architectural Registers     Physical Registers              │
-  │  (Bạn thấy trong Assembly)   (CPU thật sự dùng bên trong)  │
-  │                                                              │
-  │  EAX  ──────────────────►  P47, P92, P15, ...               │
-  │  EBX  ──────────────────►  P03, P88, ...                    │
-  │  ECX  ──────────────────►  P55, P12, ...                    │
-  │  ...                       (Pool ~180-200 registers)        │
-  │                                                              │
-  │  16 tên ← mapping → ~200 registers vật lý                   │
-  └─────────────────────────────────────────────────────────────┘
-```
+CPU hiện đại dùng kỹ thuật **Register Renaming** để ánh xạ ~16 thanh ghi logic (EAX, EBX...) sang ~180-200 thanh ghi vật lý bên trong. Điều này cho phép CPU thực thi các lệnh độc lập song song ngay cả khi chúng dùng chung tên thanh ghi cơ bản, phá vỡ các rào cản phụ thuộc dữ liệu (WAW/WAR dependencies).
 
 ```
 Register File trong CPU x86-64 (đơn giản hóa):
@@ -1425,42 +1387,29 @@ Bài toán: Tính tổng 1 triệu số (1,000,000 ints = ~4 MB)
 ### 6.4. Bảng tốc độ chi tiết — Memory Hierarchy
 
 ```mermaid
-block-beta
-    columns 1
-    
-    block:HighSpeed
-        registers["Registers<br/>0ns"]
-        l1["L1 Cache<br/>~1ns"]
+graph TD
+    subgraph High_Speed ["Tốc độ cao"]
+        Reg["Registers<br/>0ns"] --- L1["L1 Cache<br/>~1ns"]
     end
     
-    block:MediumSpeed
-        l2["L2 Cache<br/>~3ns"]
-        l3["L3 Cache<br/>~10ns"]
+    subgraph Medium_Speed ["Tự trung bình"]
+        L2["L2 Cache<br/>~3ns"] --- L3["L3 Cache<br/>~10ns"]
     end
     
-    block:MainMemory
-        ram["DDR5 RAM<br/>~50-100ns"]
-    end
-    
-    block:Storage
-        ssd["SSD (NVMe)<br/>~10,000ns"]
-        hdd["HDD<br/>~5,000,000ns"]
+    subgraph Slow_Speed ["Chậm"]
+        RAM["DDR5 RAM<br/>~50-100ns"] --- SSD["SSD NVMe<br/>~10k ns"] --- HDD["HDD<br/>~5m ns"]
     end
 
-    registers --> l1
-    l1 --> l2
-    l2 --> l3
-    l3 --> ram
-    ram --> ssd
-    ssd --> hdd
+    L1 --- L2
+    L3 --- RAM
 
-    style registers fill:#ffcdd2,stroke:#b71c1c
-    style l1 fill:#ffcdd2,stroke:#b71c1c
-    style l2 fill:#fff9c4,stroke:#fbc02d
-    style l3 fill:#fff9c4,stroke:#fbc02d
-    style ram fill:#e1f5fe,stroke:#0277bd
-    style ssd fill:#e0e0e0,stroke:#616161
-    style hdd fill:#e0e0e0,stroke:#616161
+    style Reg fill:#ffcdd2,stroke:#b71c1c
+    style L1 fill:#ffcdd2,stroke:#b71c1c
+    style L2 fill:#fff9c4,stroke:#fbc02d
+    style L3 fill:#fff9c4,stroke:#fbc02d
+    style RAM fill:#e1f5fe,stroke:#0277bd
+    style SSD fill:#e0e0e0,stroke:#616161
+    style HDD fill:#e0e0e0,stroke:#616161
 ```
 
 > **Quy tắc vàng:**
@@ -1479,21 +1428,21 @@ graph TD
     classDef storage fill:#fff3e0,stroke:#e65100,stroke-width:2px;
     classDef memory fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px;
 
-    subgraph CPU_Core [CPU CORE #0]
+    subgraph CPU_Core ["CPU CORE #0"]
         direction TB
 
-        subgraph Control_Unit [★ CU — CONTROL UNIT - Bếp trưởng]
+        subgraph Control_Unit ["★ CU — CONTROL UNIT - Bếp trưởng"]
             direction TB
             Fetch[Fetch<br/>Tải lệnh từ L1i]
-            Decoder[Decoder<br/>Giải mã → μops]
+            Decoder["Decoder<br/>Giải mã → μops"]
             Scheduler[Scheduler / Rename<br/>Phân công lệnh]
             
             Fetch --> Decoder --> Scheduler
         end
         
-        BP[Branch Predictor<br/>Đoán nhánh if/else] -.-> Fetch
+        BP["Branch Predictor - Đoán nhánh if-else"] -.-> Fetch
 
-        RF[★★★ REGISTER FILE ★★★<br/>TRUNG TÂM — Mặt bàn bếp]:::storage
+        RF["★★★ REGISTER FILE ★★★<br/>TRUNG TÂM — Mặt bàn bếp"]:::storage
 
         subgraph Execution_Units [Execution Units - Đầu bếp]
             direction LR
@@ -1527,11 +1476,13 @@ graph TD
         L1d <==> L2c
     end
 
-    L3[L3 Cache (Shared)<br/>8-96 MB<br/>Kho tầng hầm]:::memory
-    RAM[DDR5 RAM<br/>16-64 GB<br/>Siêu thị]:::memory
+    L3["L3 Cache - Shared - 8-96 MB - Kho tầng hầm"]
+    RAM["DDR5 RAM - 16-64 GB - Siêu thị"]:::memory
 
     L2c <==> L3
     L3 <==> RAM
+    
+    class L3 memory
 ```
 
 | Thành phần | Vai trò | Ẩn dụ nhà bếp |
@@ -1557,23 +1508,8 @@ graph TD
 
 > **Điểm mấu chốt:** Register File nằm **NGAY TRUNG TÂM** CPU Core, cách ALU chỉ vài **micromet** (1 micromet = 1/1000 mm). Tín hiệu điện đi từ Register → ALU → Register trong **cùng 1 clock cycle**. Đây là lý do nó nhanh nhất.
 
-### 7.1. Register Renaming — Ảo thuật của CPU (Nâng cao)
-
-Code Assembly dùng các tên cố định (`RAX`, `RBX`...), gọi là **Architectural Registers** (16 cái).
-Nhưng CPU hiện đại thực sự có hàng trăm **Physical Registers** (168+ cái trên Core i9).
-
-**Tại sao cần Renaming?** — Để chạy song song (Instruction Level Parallelism).
-
-```asm
-1. MOV EAX, 1     ; EAX(logic) → Physical_Reg_10
-2. ADD EAX, 5     ; Dùng PR_10
-
-3. MOV EAX, 100   ; EAX(logic) → Physical_Reg_99 (Đổi tên!)
-                  ; CPU không cần chờ dòng 2 xong. Nó cấp ngay PR_99 mới.
-4. ADD EAX, 2     ; Dùng PR_99
-```
-
-→ Lệnh (3)-(4) chạy **SONG SONG** với (1)-(2) vì chúng dùng thanh ghi vật lý KHÁC NHAU, dù chung tên `EAX`.
+### 7.1. Register Renaming — Tối ưu song song (Nâng cao)
+Như đã đề cập ở **Mục 4.2**, Register Renaming cho phép CPU giải quyết các xung đột tên (Name Dependencies) bằng cách cấp phát các thanh ghi vật lý mới từ một "Pool" chung (~200 thanh ghi). Điều này giúp CPU có thể thực thi hàng chục lệnh cùng lúc mà không bị nghẽn bởi số lượng thanh ghi logic hạn chế của kiến trúc x86.
 
 ---
 
@@ -1629,7 +1565,7 @@ graph LR
         B8[Blk 8]:::ram
     end
 
-    subgraph Set0 [Set 0 (4 Ways)]
+    subgraph Set0 ["Set 0 - 4 Ways"]
         direction TB
         W0[Way 0: Blk 0]:::cache
         W1[Way 1: Blk 4]:::cache
