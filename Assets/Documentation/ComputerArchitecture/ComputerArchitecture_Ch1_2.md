@@ -1077,40 +1077,43 @@ Action:   [ Fetch ][ Decode][ Execute ]
 
 ## 3. Kiến trúc CPU Core — Nơi mọi thứ hội tụ
 
-### 3.1. Bộ ba trụ cột (ALU - CU - Registers)
-
-Để CPU chạy được, nó cần sự phối hợp nhịp nhàng của 3 bộ phận cốt lõi. Hãy xem bức tranh toàn cảnh (**CPU Datapath**) bên dưới:
 
 ```mermaid
-graph TD
+flowchart TD
     %% Styling
-    classDef memory fill:#e1f5fe,stroke:#01579b,stroke-width:2px
-    classDef cpu fill:#fff3e0,stroke:#e65100,stroke-width:3px
-    classDef control fill:#fce4ec,stroke:#880e4f,stroke-width:2px
-    classDef alu fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
-    classDef reg fill:#fff,stroke:#333,stroke-width:1px
-    classDef bus_a fill:#ffecb3,stroke:#ffa000,stroke-width:4px
-    classDef bus_d fill:#c8e6c9,stroke:#388e3c,stroke-width:4px
-    classDef bus_c fill:#f8bbd0,stroke:#c2185b,stroke-width:2px,stroke-dasharray: 5 5
+    classDef memory fill:#e1f5fe,stroke:#01579b,stroke-width:2px,font-size:16px,font-weight:bold
+    classDef cpu fill:#fff3e0,stroke:#e65100,stroke-width:3px,font-size:18px,font-weight:bold
+    classDef control fill:#fce4ec,stroke:#880e4f,stroke-width:2px,font-size:15px,font-weight:bold
+    classDef alu fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px,font-size:15px,font-weight:bold
+    classDef reg fill:#fff,stroke:#333,stroke-width:1px,font-size:14px
+    classDef bus_a fill:#ffecb3,stroke:#ffa000,stroke-width:4px,font-size:14px,font-weight:bold
+    classDef bus_d fill:#c8e6c9,stroke:#388e3c,stroke-width:4px,font-size:14px,font-weight:bold
+    classDef bus_c fill:#f8bbd0,stroke:#c2185b,stroke-width:2px,stroke-dasharray: 5 5,font-size:14px,font-weight:bold
+    classDef note fill:#fff9c4,stroke:#fbc02d,stroke-width:1px,stroke-dasharray: 2 2,font-size:15px
 
     subgraph SYSTEM_BUS ["Hệ Thống Bus (Xa Lộ Dữ Liệu)"]
-        ABus("Address Bus (Đường Địa Chỉ)"):::bus_a
-        DBus("Data Bus (Đường Dữ Liệu)"):::bus_d
-        CBus("Control Bus (Đường Điều Khiển)"):::bus_c
+        direction LR
+        ABus[["Address Bus (Đường Địa Chỉ)"]]:::bus_a
+        DBus[["Data Bus (Đường Dữ Liệu)"]]:::bus_d
+        CBus[["Control Bus (Đường Điều Khiển)"]]:::bus_c
     end
 
     subgraph RAM ["Main Memory (RAM)"]
+        direction TB
         RAM_Cells["[ Ngăn Nhớ 1 ]\n[ Ngăn Nhớ 2 ]\n[ ... ]"]:::memory
     end
 
     subgraph CPU ["CPU CORE (Bức Tranh Toàn Cảnh)"]
+        direction TB
         
         subgraph CU ["Control Unit (Bộ Giải Mã & Điều Phối)"]
             Decoder["Instruction Decoder\n(Giải Mã Lệnh)"]:::control
             Sequencer["Control Logic / Sequencer\n(Tạo Xung Điều Khiển)"]:::control
         end
+        note_CU[/"<b>CU (Bếp Trưởng)</b><br/>- <b>Vai trò:</b> Bộ não điều phối.<br/>- <b>Nhiệm vụ:</b> Đọc lệnh từ CIR -> Giải mã (Decode) -> Gửi Control Signal.<br/>- <b>Ví dụ:</b> Gặp lệnh LOAD -> Bảo RAM nhả dữ liệu; Gặp ADD -> Bảo ALU tính."/]:::note
 
         subgraph REG_FILE ["Register File (Tập Hợp Thanh Ghi)"]
+            direction TB
             subgraph SPEC ["Special Purpose (Chuyên Dụng)"]
                 PC["PC (Program Counter)\nTrỏ lệnh kế tiếp"]:::reg
                 MAR["MAR (Mem Addr Reg)\nGiữ địa chỉ RAM"]:::reg
@@ -1123,31 +1126,28 @@ graph TD
                 PTR["RSI, RDI, RSP, RBP\nĐịa chỉ/Stack"]:::reg
             end
         end
+        note_REG[/"<b>Registers (Khu Sơ Chế)</b><br/><b>1. Special Purpose (Chuyên Dụng):</b><br/>- <b>PC:</b> Ngón tay chỉ đường (lệnh kế).<br/>- <b>MAR/MDR:</b> Giao liên với RAM.<br/>- <b>CIR:</b> Chứa lệnh đang chạy.<br/><b>2. General Purpose (Đa Năng):</b><br/>- <b>RAX, RBX...:</b> Biến tạm cho Lập trình viên."/]:::note
 
         subgraph ALU_BLOCK ["Execution Unit (Khối Thực Thi)"]
             ALU(("ALU\n(Cộng, Trừ, Logic)")):::alu
             Flags["Flags Register\n(Zero, Carry, Sign)"]:::alu
         end
+        note_ALU[/"<b>ALU (Phụ Bếp)</b><br/>- <b>Vai trò:</b> Cơ bắp tính toán.<br/>- <b>Nhiệm vụ:</b> Thực thi phép tính (Add, Sub, Mul, Logic).<br/>- <b>Flags:</b> Lưu trạng thái (Z, C, O) để rẽ nhánh (if)."/]:::note
     end
 
-    %% --- LƯU ĐỒ CHU KỲ (FETCH - DECODE - EXECUTE) ---
+    note_BUS[/"<b>HỆ THỐNG BUS (Xa Lộ Thông Tin)</b><br/>- <b>Address Bus (Vàng):</b> Xe chở địa chỉ nhà (CPU muốn gõ cửa nhà ai?).<br/>- <b>Data Bus (Xanh):</b> Xe tải chở hàng (Lệnh hoặc Dữ liệu).<br/>- <b>Control Bus (Hồng):</b> Đèn giao thông (Đọc hay Ghi?)."/]:::note
 
-    %% Phase 1: FETCH
-    PC -- "1. Gửi địa chỉ" --> MAR
-    MAR == "2. Chốt địa chỉ" ==> ABus
-    ABus == "Tìm ngăn nhớ" ==> RAM_Cells
-    RAM_Cells == "3. Nhả Lệnh/Dữ liệu" ==> DBus
-    DBus == "Chép về" ==> MDR
-    MDR -- "4. Chuyển lệnh" --> CIR
-    Sequencer -- "5. Tăng PC (+1)" --> PC
+    note_FETCH[/"<b>1. FETCH (Đi Chợ)</b><br/>- <b>PC -> MAR:</b> 'Tôi muốn mua hàng ở địa chỉ X'.<br/>- <b>MAR -> Address Bus:</b> Gửi địa chỉ X đến RAM.<br/>- <b>RAM -> Data Bus:</b> Trả gói hàng (Lệnh) về MDR.<br/>- <b>MDR -> CIR:</b> Cất vào kho (CIR) để chuẩn bị mổ xẻ.<br/>- <b>PC++:</b> Chuẩn bị sẵn phiếu đi chợ tiếp theo."/]:::note
 
     %% Phase 2: DECODE
-    CIR -- "6. Gửi Opcode" --> Decoder
-    Decoder -- "7. Phân tích" --> Sequencer
+    CIR -- "Gửi Opcode" --> Decoder
+    Decoder -- "Phân tích" --> Sequencer
+
+    note_DECODE[/"<b>2. DECODE (Giải Mã)</b><br/>- <b>CIR -> Decoder:</b> Mở gói hàng ra xem là gì.<br/>- <b>Decoder:</b> Dịch mã nhị phân (0101 -> ADD).<br/>- <b>Sequencer:</b> Lên kế hoạch, bật các mạch cần thiết."/]:::note
 
     %% Phase 3: EXECUTE
-    Sequencer -.->|"8a. Kích hoạt"| ALU
-    Sequencer -.->|"8b. Lệnh Đọc/Ghi"| CBus
+    Sequencer -.->|"Kích hoạt"| ALU
+    Sequencer -.->|"Lệnh Đọc/Ghi"| CBus
     CBus -.-> RAM_Cells
     
     MDR -- "Toán hạng" --> ALU
@@ -1156,135 +1156,34 @@ graph TD
     ALU -- "Cập nhật cờ" --> Flags
     
     ACC -- "Lưu kết quả" --> MDR
-    MDR == "9. Ghi vào RAM" ==> DBus
+    MDR ==>|"Ghi vào RAM"| DBus
     DBus ==> RAM_Cells
+
+    note_EXEC[/"<b>3-5. PIPELINE EXECUTION</b><br/>- <b>EXEC (Execute):</b> ALU tính toán kết quả thô.<br/>- <b>MEM (Memory):</b> Đọc/Ghi RAM hoặc Cache (chỉ lệnh Load/Store).<br/>- <b>WB (Write Back):</b> Ghi kết quả từ ALU/MEM ngược về <b>Register File</b>."/]:::note
+
+    note_DEEP[/"<b>DEEP DIVE: CU (Làm sao CPU hiểu?)</b><br/>- <b>Decoder:</b> Tra bảng mã (0001=MOV, 0010=ADD).<br/>- <b>Micro-ops:</b> Lệnh phức tạp (CISC) được 'băm' nhỏ thành uOps (RISC).<br/>- <b>Microcode ROM:</b> Chứa 'lời giải' phần cứng cho mọi lệnh.<br/>- <b>Dispatch:</b> Đẩy uOps vào các Port (ALU/FPU) đang rảnh."/]:::note
+
+    note_HIERARCHY[/"<b>HIERARCHY: CU vs ALU</b><br/>- <b>CU (CEO):</b> Chỉ đạo, không trực tiếp làm.<br/>- <b>ALU (Công nhân):</b> Chỉ làm, không cần biết tại sao.<br/>- <b>Superscalar:</b> 1 CU có thể điều khiển NHIỀU ALU chạy song song (như 1 bếp trưởng quản 4 bếp phụ)."//]:::note
+
+    %% Linking Notes
+    SYSTEM_BUS ~~~ note_BUS
+    CU -.- note_CU
+    CU -.- note_DEEP
+    ALU_BLOCK -.- note_ALU
+    REG_FILE -.- note_REG
+    
+    CU ~~~ note_HIERARCHY
+    ALU_BLOCK ~~~ note_HIERARCHY
+
+    RAM_Cells -.- note_FETCH
+    Decoder -.- note_DECODE
+    ALU -.- note_EXEC
+
+    %% Styling Connections
+    linkStyle 1,2 stroke:#ffa000,stroke-width:3px
+    linkStyle 3,4,17,18 stroke:#388e3c,stroke-width:3px
+    linkStyle 9,10,11 stroke:#c2185b,stroke-width:2px,stroke-dasharray: 5 5
 ```
-
-### 3.1. Ba Trụ Cột Của CPU (Phần Cứng)
-
-Dựa trên sơ đồ trên, chúng ta chi tiết hóa vai trò của từng bộ phận:
-
-#### a. CU (Control Unit) — Bếp trưởng điều phối
-*   **Vai trò:** "Bộ não" của CPU.
-*   **Nhiệm vụ:** Đọc lệnh từ thanh ghi **CIR**, giải mã (Decode) xem đó là lệnh gì (Cộng, Trừ, hay Nhảy?), sau đó gửi tín hiệu điện qua các đường dây điều khiển (Control Lines) để sai bảo các bộ phận khác làm việc.
-*   **Ví dụ:** Gặp lệnh `LOAD`, CU ra lệnh cho RAM "nhả" dữ liệu. Gặp lệnh `ADD`, CU ra lệnh cho ALU "tính" dữ liệu.
-
-#### b. ALU (Arithmetic Logic Unit) — Cỗ máy thực thi
-*   **Vai trò:** "Cơ bắp" của CPU.
-*   **Nhiệm vụ:** Thực hiện mọi phép tính toán học (`Add`, `Sub`, `Mul`, `Div`) và logic (`AND`, `OR`, `NOT`, So sánh).
-*   **Vật lý:** Là tập hợp hàng triệu cổng logic (Logic Gates). Kết quả tính toán thường được lưu tạm vào thanh ghi **ACC** (Accumulator) hoặc các thanh ghi đa năng.
-
-#### c. Registers — Thanh ghi (Register File)
-Đây là bộ nhớ nằm bên trong CPU, nhanh nhất trong cả hệ thống máy tính. Khối này thực chất là một **Register File** — tập hợp các thanh ghi chuyên dụng và đa năng phục vụ cho việc tính toán và điều khiển.
-
-##### 1. Thanh ghi chuyên dụng (Special Purpose)
-Được CPU quản lý nội bộ để điều phối vòng đời lệnh:
-*   **PC (Program Counter):** "Ngón tay chỉ đường". Luôn trỏ vào địa chỉ của **lệnh tiếp theo** cần chạy.
-*   **MAR (Memory Address Register):** "Người đưa thư". Chứa **địa chỉ** muốn truy cập trong RAM.
-*   **MDR (Memory Data Register):** "Cổng giao nhận". Chứa **dữ liệu** vừa lấy từ RAM về hoặc chuẩn bị ghi xuống RAM.
-*   **CIR (Current Instruction Register):** "Bàn làm việc". Chứa **mã lệnh đang thực thi** hiện tại.
-*   **FLAGS Register:** Chứa các trạng thái (Z: Zero, C: Carry, O: Overflow, ...) sau khi ALU tính toán xong để phục vụ lệnh rẽ nhánh (`if`).
-
-##### 2. Thanh ghi đa năng (General Purpose - x86-64)
-Lập trình viên Assembly dùng để tính toán và lưu biến trung gian:
-*   **RAX (Accumulator):** Thường dùng cho các phép toán và chứa kết quả trả về của hàm.
-*   **RBX (Base Register):** Dùng làm địa chỉ cơ sở để truy cập dữ liệu.
-*   **RCX (Counter Register):** "Lính đếm". Dùng tự động trong các vòng lặp (`loop`).
-*   **RDX (Data Register):** Phối hợp với RAX cho các phép nhân/chia lớn.
-*   **RSI (Source Index) & RDI (Destination Index):** Dùng để copy mảng dữ liệu (Source/Destination).
-*   **RSP (Stack Pointer):** Trỏ vào đỉnh của Stack (vùng nhớ của function).
-*   **RBP (Base Pointer):** Trỏ vào đáy của Stack Frame hiện tại.
-
-> [!TIP]
-> **Tại sao cần nhiều thanh ghi?** Nếu chỉ có 1 thanh ghi, CPU sẽ phải ghi kết quả ra RAM liên tục rồi lại đọc vào (Stall). Có nhiều thanh ghi giúp CPU giữ được nhiều "nguyên liệu" trên bàn chế biến, giúp Pipeline không bị ngắt quãng.
-
-### 3.2. Vòng Đời Lệnh: Fetch - Decode - Execute
-
-Đây là "nhịp tim" của máy tính. Quy trình này lặp đi lặp lại hàng tỷ lần mỗi giây.
-
-#### Bước 1: Fetch (Tìm nạp lệnh) — "Đi chợ"
-*   **Mục tiêu:** Lấy lệnh từ RAM mang về CPU.
-1.  **PC → MAR:** CPU chép địa chỉ lệnh tiếp theo từ PC sang MAR.
-2.  **MAR → RAM:** MAR gửi địa chỉ này qua Address Bus tới RAM, kèm tín hiệu "Đọc" (Read).
-3.  **RAM → MDR:** RAM tìm thấy dữ liệu tại địa chỉ đó, gửi gói lệnh qua Data Bus về MDR.
-4.  **MDR → CIR:** Để giải phóng MDR cho việc khác, lệnh được chép an toàn vào CIR.
-5.  **PC++:** PC tự tăng lên (ví dụ +4 byte) để sẵn sàng cho lệnh sau.
-
-#### Bước 2: Decode (Giải mã) — "Đọc công thức"
-*   **Mục tiêu:** Hiểu lệnh này muốn làm gì.
-1.  **CU đọc CIR:** Control Unit phân tích mã nhị phân trong CIR.
-2.  **Dịch mã:** Ví dụ mã `1010` được hiểu là `ADD` (Cộng).
-3.  **Chuẩn bị:** CU xác định cần dùng dữ liệu nào, nằm ở đâu (trong Register hay RAM).
-
-#### Bước 3: Execute (Thực thi) — "Nấu ăn"
-*   **Mục tiêu:** Thực hiện công việc. Tùy vào loại lệnh mà hành động sẽ khác nhau:
-    *   **Lệnh Tính toán (ADD/SUB):** Dữ liệu từ Register được đẩy vào ALU. ALU tính xong trả kết quả về ACC hoặc Register.
-    *   **Lệnh Bộ nhớ (LOAD/STORE):** CU điều khiển MAR và MDR để đọc/ghi dữ liệu từ RAM.
-    *   **Lệnh Rẽ nhánh (JUMP):** CPU cập nhật giá trị mới thẳng vào PC (thay đổi dòng lệnh tiếp theo sẽ chạy).
-
----
-
-### 3.3. Làm sao CPU "hiểu" được lệnh? (Deep Dive: CU)
-
-Làm sao chuỗi bit `0101` lại biến thành hành động vật lý?
-
-#### a. Quá trình giải mã (Decoding)
-CPU có một bảng tra cứu bằng phần cứng (**Instruction Decoder**):
-
-| Opcode (Binary) | Lệnh | CU sẽ làm gì? |
-| :--- | :--- | :--- |
-| `0001` | **MOV** | Bật mạch nối RAM → Registers. |
-| `0010` | **ADD** | Bật mạch **Adder** của ALU. |
-| `0100` | **JMP** | Ghi giá trị mới vào thanh ghi **RIP**. |
-
-#### b. CU được xây dựng như thế nào?
-1.  **Hardwired Control (Mạch cứng):** Dùng cổng logic hàn chết. Siêu nhanh (Kiến trúc ARM dùng nhiều).
-2.  **Microprogrammed (Vi chương trình):** Dùng một bộ nhớ nhỏ ROM. Linh hoạt, có thể cập nhật Microcode để sửa lỗi (Kiến trúc Intel x86 dùng cách này).
-
-#### c. Hành trình của một lệnh: ADD EAX, EBX (Deep Walkthrough)
-
-Để thực sự nắm được CU làm gì, hãy xem "một ngày của lệnh `ADD EAX, EBX`":
-
-**Bí mật của phần cứng (Hardware Implementation):**
-
-Thay vì thực thi trực tiếp, CPU hiện đại sử dụng một "mánh khóe" gọi là **Micro-ops Translation**:
-
-1.  **Instruction Decoder (Bộ giải mã):**
-    *   Khi lệnh `ADD EAX, EBX` đi vào, nó không chạy ngay.
-    *   Decoder sẽ "băm" lệnh này thành các mảnh nhỏ hơn gọi là **Micro-ops (uOps)**.
-
-2.  **Microcode ROM:**
-    *   Bên trong CU có một bộ nhớ tí hon (ROM) chứa "lời giải" cho mọi lệnh.
-    *   Ví dụ: Lệnh `ADD` = `Load A` + `Load B` + `ALU_Add` + `Store Result`.
-
-> **Tại sao phải làm vậy?**
-> Để tương thích ngược! Intel vẫn giữ tập lệnh x86 từ năm 1978 (CISC) để chạy phần mềm cũ, nhưng bên trong lõi phần cứng lại chạy theo kiểu RISC hiện đại (nhanh, đơn giản) thông qua lớp phiên dịch này.
-
-**2. Physical Reality (Thực tế Intel/AMD):**
-*   **Front-end (Dịch thuật):** Lệnh x86 `ADD` thực chất là lệnh phức tạp. CPU dịch nó thành một hoặc nhiều **micro-ops** (uOps) đơn giản hơn.
-*   **Dispatch (Phân vai):** Một bộ phận gọi là Scheduler sẽ đẩy uOp này vào một **Execution Port** đang rảnh (ví dụ: Port 1 trên Intel Core i9 có bộ ALU).
-*   **Clock Gating (Tiết kiệm):** Chỉ có mạch dẫn tới bộ Cộng trên Port 1 là nhận xung nhịp (Clock). Các mạch bộ Nhân, bộ Chia trên cùng Port đó bị **ngắt mạch** để không tiêu tốn điện năng vô ích.
-*   **Out-of-Order Execution:** Nếu CPU thấy lệnh tiếp theo không liên quan đến `EAX`, nó có thể chạy lệnh đó **CÙNG LÚC** với lệnh ADD này để tận dụng tối đa phần cứng.
-*   **Retirement:** Kết quả được ghi vào một thanh ghi vật lý ẩn (Physical Register), sau đó mới được "chốt" vào thanh ghi kiến trúc `EAX` của bạn.
-
-> **Tư duy Logic giúp bạn hiểu LUỒNG đi của dữ liệu. Tư duy Vật lý giúp bạn hiểu tại sao CPU lại NÓNG và tại sao nó NHANH.**
-
-#### d. Phân cấp quyền lực: CU (Bộ não) vs ALU (Cơ bắp)
-
-Để trả lời câu hỏi "Ai thực sự là bộ não?", chúng ta có thể chốt lại như sau:
-
-| Bộ phận | Vai trò | Tương đương trong thực tế |
-| :--- | :--- | :--- |
-| **Control Unit (CU)** | **Executive (Điều hành)** | Bếp trưởng / CEO / Bộ não điều khiển. |
-| **ALU** | **Executor (Thực thi)** | Đầu bếp / Công nhân / Máy tính cầm tay. |
-
-**Tại sao phải chia ra như vậy?**
-1.  **Sự chuyên môn hóa:** ALU không cần biết lệnh `ADD` đến từ đâu, nó chỉ cần biết có 2 số đầu vào và nó phải cộng. CU lo toàn bộ việc "hậu cần" (fetch, decode).
-2.  **Khả năng mở rộng (Superscalar):** Trong các CPU hiện đại (Intel/AMD Core i7/i9), một "Bộ não" CU có thể điều khiển **nhiều** "Cơ bắp" ALU cùng lúc. 
-    - Giống như một bếp trưởng chỉ đạo 4-5 đầu bếp nấu ăn song song để phục vụ khách nhanh hơn. 
-    - Nếu không tách CU ra, bạn không thể làm được việc chạy song song (Parallelism) ở mức độ phần cứng này.
-
-> **Hardware Nuance:** Trong kiến trúc hiện đại, CU thậm chí còn thông minh đến mức nhìn trước được tương lai (Branch Prediction). Nó đoán xem lệnh tiếp theo là gì để "chuẩn bị thớt" sẵn cho ALU, giúp ALU không bao giờ phải ngồi chơi xơi nước.
 
 
 
@@ -1294,97 +1193,147 @@ Thay vì thực thi trực tiếp, CPU hiện đại sử dụng một "mánh kh
 
 Nếu mỗi lệnh phải hoàn thành tất cả bước trước khi bắt đầu lệnh tiếp, CPU sẽ cực kỳ lãng phí. **Pipeline** giải quyết điều này bằng cách overlap các giai đoạn:
 
-```mermaid
-gantt
-    title So sánh Sequential vs Pipeline
-    dateFormat  X
-    axisFormat %s
-    section Lệnh 1
-    F|D|E|M|W :0, 5
-    section Lệnh 2 (No Pipe)
-    F|D|E|M|W :5, 10
-    section Lệnh 2 (With Pipe)
-    F|D|E|M|W :1, 6
-    section Lệnh 3 (With Pipe)
-    F|D|E|M|W :2, 7
-```
+### 4.1. Pipeline Visualization (Biểu đồ Không gian - Thời gian)
+
+Cách tốt nhất để hình dung sự khác biệt là nhìn vào **Space-Time Diagram** (Bảng Lệnh vs Chu kỳ):
+
+#### a. Mô hình Tuần tự (Sequential - Non-Pipelined)
+*Mỗi lệnh phải chờ lệnh trước xong hẳn mới được bắt đầu.*
+
+| Lệnh \ Chu kỳ (Time) | T1 | T2 | T3 | T4 | T5 | T6 | T7 | T8 | T9 | T10 |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Lệnh 1** | **F** | D | E | M | W | | | | | |
+| **Lệnh 2** | | | | | | **F** | D | E | M | W |
+| **Lệnh 3** | | | | | | | | | | |
+> **Nhận xét:** Lãng phí 4 chu kỳ (T2-T5) mà bộ phận Fetch không làm gì cả.
+
+#### b. Mô hình Pipeline (Gối đầu - Parallel)
+*Ngay khi Lệnh 1 xong Fetch (T1), bộ phận Fetch rảnh tay để nạp Lệnh 2 ngay lập tức.*
+
+| Lệnh \ Chu kỳ (Time) | T1 | T2 | T3 | T4 | T5 | T6 | T7 | T8 | T9 | T10 |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Lệnh 1** | **F** | D | E | M | W | | | | | |
+| **Lệnh 2** | | **F** | D | E | M | W | | | | |
+| **Lệnh 3** | | | **F** | D | E | M | W | | | |
+| **Lệnh 4** | | | | **F** | D | E | M | W | | |
+| **Lệnh 5** | | | | | **F** | D | E | M | W | |
+> **Nhận xét:** Tại thời điểm **T5**, cả 5 bộ phận (Fetch, Decode, ALU, RAM, Write) đều đang làm việc cùng lúc cho 5 lệnh khác nhau. **Hiệu suất tăng gấp 5 lần!**
+
+**Chú thích:**
+*   **F (Fetch):** Nạp lệnh.
+*   **D (Decode):** Giải mã.
+*   **E (Execute):** Thực thi.
+*   **M (Memory):** Truy cập RAM.
+*   **W (Write Back):** Ghi kết quả.
 
 > **Giải thích:** Trong mô hình có Pipeline, khi Lệnh 1 đang bước vào giai đoạn Decode (cycle 2), Lệnh 2 đã bắt đầu Fetch. Các bộ phận CPU luôn bận rộn thay vì ngồi chờ.
 
-#### > Visualizing the Pipeline (Assembly View):
-Giả sử ta có 3 lệnh Assembly liên tiếp: `MOV`, `ADD`, `MOV`.
+
+
+### 4.2. Tại sao gọi là "Siêu phân luồng"? (Superscalar & Out-of-Order)
+
+Trước khi đi vào chi tiết Pipeline hiện đại, ta cần hiểu 2 khái niệm cốt lõi giúp CPU đạt tốc độ khủng khiếp:
+
+#### a. Superscalar (Siêu phân luồng)
+*   **Pipeline Thường (Scalar):** Mỗi chu kỳ chỉ nạp và chạy **1 lệnh**. (IPC = 1).
+*   **Superscalar:** CPU có **nhiều Pipeline song song** (ví dụ: 4 bộ Fetch, 4 bộ ALU). Mỗi chu kỳ nó nạp và chạy **nhiều lệnh cùng lúc**. (IPC > 1).
+    *   *Ví dụ:* Thay vì 1 người giặt đồ, bạn có 4 người giặt đồ cùng lúc.
+
+#### b. Out-of-Order Execution (OoO — Thực thi lộn xộn)
+*   **In-Order (Tuần tự):** Lệnh nào vào trước thì chạy trước. Nếu Lệnh 1 bị tắc (chờ RAM), Lệnh 2, 3, 4 phải đứng chờ theo (Stall).
+*   **Out-of-Order:** CPU "nhìn trước" trong hàng đợi lệnh. Nếu thấy Lệnh 1 bị tắc, nó sẽ **nhặt Lệnh 2, 3 ra chạy trước** (miễn là Lệnh 2, 3 không phụ thuộc Lệnh 1). Sau đó, nó sẽ sắp xếp kết quả lại đúng thứ tự ban đầu.
+    *   *Ví dụ:* Bạn định nấu Cơm và Luộc rau. Nồi cơm điện chưa cắm (chờ), bạn tranh thủ nhặt rau và luộc rau trước.
+
+---
+
+### 4.3. Pipeline hiện đại (Thực tế)
+
+CPU hiện đại (Zen 5, Intel Core Ultra) kết hợp cả 2 kỹ thuật trên: pipeline dài **19-25 stages** và là **superscalar** rộng (4-6 lệnh/cycle):
 
 ```mermaid
-graph LR
-    subgraph Cycle_3 ["Trạng thái tại Cycle 3"]
-        direction LR
-        L1[Lệnh 1: EXECUTE]:::exec
-        L2[Lệnh 2: DECODE]:::dec
-        L3[Lệnh 3: FETCH]:::fet
+flowchart TD
+    %% --- FRONT END ---
+    subgraph Front_End ["FRONT-END: In-Order (Tuần tự)"]
+        direction TB
+        Fetch["① Fetch\n(Tải lệnh)"]:::front --> Pre["② Pre-decode\n(Tìm ranh giới)"]:::front
+        Pre --> Decode["③ Decode\n(x86 -> μops)"]:::front
+        Decode --> Rename["④ Rename\n(Đổi tên Regs)"]:::front
     end
 
-    classDef exec fill:#f8d7da,stroke:#721c24
-    classDef dec fill:#fff3cd,stroke:#856404
-    classDef fet fill:#d4edda,stroke:#155724
-```
-**Tại cycle 3:**
-*   **ALU** đang bận thực hiện phép tính cho Lệnh 1.
-*   **CU** đang bận giải mã Lệnh 2.
-*   **Bus** đang bận tải Lệnh 3 từ Cache.
-*   → **Cả 3 bộ phận cốt lõi đều làm việc CÙNG LÚC!**
-
-#### Ẩn dụ — Giặt đồ:
-```mermaid
-graph TD
-    subgraph No_Pipeline [Không Pipeline: 270 phút]
-        C1["Cuộn 1: Giặt -> Sấy -> Gấp"] --> C2["Cuộn 2: Giặt -> Sấy -> Gấp"]
-    end
-    subgraph With_Pipeline [Có Pipeline: 150 phút]
-        G1[Cuộn 1 Giặt] --> S1[Cuộn 1 Sấy]
-        S1 --> F1[Cuộn 1 Gấp]
-        G1 -.-> G2[Cuộn 2 Giặt]
-        G2 --> S2[Cuộn 2 Sấy]
-        S1 -.-> S2
-    end
-```
-
-### 4.2. Pipeline hiện đại — Superscalar & Out-of-Order
-
-CPU hiện đại (Zen 5, Intel Core Ultra) có pipeline **19-25 stages** và là **superscalar** (nhiều pipeline chạy song song):
-
-```mermaid
-graph TD
-    subgraph Front_End [FRONT-END: Thu thập & Giải mã]
-        Fetch[① Fetch: Tải lệnh từ L1i] --> Pre[② Pre-decode: Tìm ranh giới]
-        Pre --> Decode[③ Decode: x86 -> μops]
-        Decode --> Rename[④ Rename: Đổi tên Registers]
-    end
-
-    subgraph Back_End [BACK-END: Thực thi Out-of-Order]
-        Rename --> Dispatch[⑤ Dispatch & Schedule]
-        Dispatch --> ALU[Reservation Stations]
+    %% --- BACK END ---
+    subgraph Back_End ["BACK-END: Out-of-Order (Lộn xộn)"]
+        direction TB
+        Rename --> Dispatch["⑤ Dispatch & Schedule\n(Cấp phát ROB & RS)"]:::back
+        Dispatch ==> |"Issue (Nhanh/Chậm)"| RS["Reservation Stations\n(Hàng đợi thực thi)"]:::back
         
-        subgraph Execution_Units [Execution Units]
-            ALU --> E1[ALU #0-3: Số nguyên]
-            ALU --> E2[FPU #0-1: Số thực]
-            ALU --> E3[Load/Store Units]
+        subgraph EXEC ["Execution Units (Song song)"]
+            direction LR
+            RS --> |"Lệnh 2 (Nhanh)"| ALU_INT["ALU #0-3\n(Số nguyên)"]:::exec
+            RS --> |"Lệnh 1 (Chậm)"| ALU_FPU["FPU #0-1\n(Số thực)"]:::exec
+            RS --> |"Lệnh 3 (Nhanh)"| LSU["Load/Store\n(Bộ nhớ)"]:::exec
         end
     end
 
-    subgraph Retire [RETIRE: Hoàn tất In-Order]
-        Execution_Units --> ROB[Re-Order Buffer]
-        ROB --> Commit[Ghi kết quả vào Register/Cache]
+    %% --- ROB & RETIRE ---
+    subgraph Retire ["RETIRE: In-Order (Tuần tự)"]
+        direction TB
+        %% Visualizing the Circular Buffer Logic
+        subgraph ROB_Detail ["Re-Order Buffer (ROB Logic)"]
+            direction LR
+            Slot1["Slot 1\n(Chờ Lệnh 1)"]:::busy
+            Slot2["Slot 2\n(DONE)"]:::ready
+            Slot3["Slot 3\n(DONE)"]:::ready
+            Slot1 --> Slot2 --> Slot3
+        end
+
+        ALU_FPU -.-> |"Xong sau"| Slot1
+        ALU_INT -.-> |"Xong trước"| Slot2
+        LSU -.-> |"Xong nhì"| Slot3
+
+        Slot1 ==> Commit["COMMIT\n(Ghi vào Reg/Cache)"]:::commit
     end
 
-    classDef front fill:#e3f2fd,stroke:#1565c0
-    classDef back fill:#fff3e0,stroke:#ef6c00
-    classDef retire fill:#e8f5e9,stroke:#2e7d32
-    class Fetch,Pre,Decode,Rename front
-    class Dispatch,ALU,E1,E2,E3 back
-    class ROB,Commit retire
+    Front_End --> Back_End --> Retire
+
+    %% Styling
+    classDef front fill:#e3f2fd,stroke:#1565c0,font-weight:bold
+    classDef back fill:#fff3e0,stroke:#ef6c00,font-weight:bold
+    classDef exec fill:#f3e5f5,stroke:#7b1fa2
+    classDef busy fill:#fff59d,stroke:#fbc02d,stroke-dasharray: 5,5
+    classDef ready fill:#a5d6a7,stroke:#2e7d32
+    classDef commit fill:#e1bee7,stroke:#8e24aa,font-weight:bold
 ```
 
 > **IPC (Instructions Per Cycle):** CPU hiện đại đạt IPC = 4-6 (hoàn thành 4-6 lệnh mỗi clock cycle nhờ superscalar). Đây là lý do tốc độ GHz không phải tất cả — IPC quan trọng không kém.
+
+#### Quy trình: In-Order → Out-of-Order → In-Order
+
+Tại sao lại có sự pha trộn này?
+
+**1. Fetch & Decode: Tuần tự (In-Order Front End)**
+CPU bắt buộc phải nạp và giải mã lệnh theo đúng thứ tự (PC, PC+4, PC+8...).
+*   **Tại sao?** CPU không thể biết dòng 10 là `ADD` hay `JUMP` nếu chưa đọc dòng 1-9. Nó cần "đọc sách" từ trái sang phải để hiểu ngữ cảnh.
+*   **Ngoại lệ:** Branch Prediction (Đoán nhánh) giúp nó nhảy cóc, nhưng về cơ bản vẫn là luồng tuần tự.
+
+**2. Execute: Lộn xộn (Out-of-Order Core)**
+Sau khi giải mã, các lệnh được ném vào một "Hồ chứa" gọi là **Reservation Stations (RS)**.
+*   **Reservation Stations (RS):** Là "phòng chờ" trước cửa từng ALU/FPU. Tại đây, lệnh nằm chờ cho đến khi "gom đủ nguyên liệu" (các toán hạng đã sẵn sàng).
+*   **Cơ chế:** Lệnh nào đủ nguyên liệu trước sẽ được ALU bốc ra làm ngay, bất kể thứ tự.
+*   **Ví dụ:** Fetch 1 -> 2 -> 3. Nhưng chạy 1 -> 3 (có sẵn) -> 2 (đang chờ dữ liệu RAM).
+
+**3. Commit/Retire: Tuần tự (In-Order Back End)**
+Khi trả kết quả cuối cùng (ghi vào Register/RAM), CPU bắt buộc phải sắp xếp lại y hệt thứ tự ban đầu.
+*   **Reorder Buffer (ROB) - "Sổ Nợ" của CPU:**
+    *   **Cơ chế:** ROB là một hàng đợi vòng (Circular Buffer). Khi lệnh được tung ra (Dispatch), nó xí một chỗ trong ROB. Khi tính xong, kết quả được ghi tạm vào đây (Speculative State) chứ **chưa** ghi vào Register File chính thức.
+    *   **Commit (Thanh toán):** ROB kiểm tra lần lượt từ đầu hàng. Chỉ khi Lệnh 1 đã xong xuôi và **không có lỗi** (như đoán sai nhánh hay chia cho 0), nó mới được phép ghi kết quả "chốt hạ" vào Register File (Architectural State) và rời khỏi hàng.
+    *   **Flush (Xóa sổ):** Nếu Lệnh 1 bị lỗi (ví dụ: đoán sai nhánh), toàn bộ các lệnh đi sau (Lệnh 2, Lệnh 3...) trong ROB sẽ bị **hủy bỏ ngay lập tức** (Flush), dù chúng đã tính xong hay chưa. Đây là cái giá phải trả của sự "anh hùng rơm" (Speculation).
+
+*(Xem chi tiết phần **ROB Logic** trong sơ đồ Pipeline tổng thể ở mục 4.3 phía trên)*
+
+> **Tóm lại chiến thuật:**
+> *   **Fetch:** Tuần tự (như đọc sách).
+> *   **Execute:** Song song, lộn xộn (như nấu ăn).
+> *   **Commit:** Tuần tự (như xếp hàng thanh toán).
 
 ---
 
@@ -1431,7 +1380,60 @@ else Die();
 ### 5.3. Structural Hazard — Tranh chấp tài nguyên
 **Khái niệm:** Hai lệnh khác nhau muốn sử dụng cùng một bộ phận phần cứng trong cùng một chu kỳ (ví dụ: vừa muốn nạp Lệnh từ RAM, vừa muốn nạp Dữ liệu từ RAM).
 
-**Ví dụ:** Lệnh `MOV EAX, [Address]` đang đọc thụt mạng (Memory Stage), trong khi lệnh tiếp theo đang cố đọc code từ bộ nhớ (Fetch Stage). Cả hai tranh nhau quyền truy cập Cache.
+> **🎮 Game Dev Deep Dive: I-Cache Pollution & OOP**
+> 
+> Trong lập trình Game, Structural Hazard thường biểu hiện ở việc tranh chấp Cache giữa Code (Instructions) và Data, đặc biệt khi dùng OOP quá đà (**Virtual Call Hell**).
+> 
+> **Ví dụ:** `List<Monster>` chứa 10 loại quái khác nhau (Zombie, Skeleton, Orc...), và gọi `monster.Update()`:
+> 
+> 1.  **Instruction Cache (L1i) bị "tràn" (Thrashing):**
+>     *   CPU phải nạp code của hàm `Zombie.Update`, chạy xong lại phải nạp code `Skeleton.Update`...
+>     *   Code thay đổi liên tục khiến L1i không thể chứa nổi, phải nạp đi nạp lại từ RAM.
+> 2.  **Data Cache (L1d) bị Miss:**
+>     *   Dữ liệu các con quái nằm rải rác trong Heap (do cấp phát động `new Monster()`).
+>     *   CPU không thể "đoán trước" (Prefetch) dữ liệu tiếp theo nằm ở đâu.
+> 
+> **Hậu quả:** CPU vừa đợi nạp Code, vừa đợi nạp Data. Pipeline tắc nghẽn hoàn toàn.
+> 
+> **Giải pháp: Data-Oriented Design (DOD) / ECS**
+> *   **Code:** Chỉ có 1 hàm `MonsterSystem` duy nhất chạy cho 10,000 entities cùng loại (Archetype) → Nằm gọn trong **L1i Cache**.
+> *   **Data:** Nằm liền nhau trong Chunk (Arrays) → Tối ưu **L1d Cache**.
+> 
+> **Kết quả:** Pipeline luôn được cấp đủ "nguyên liệu" (Data) và "công cụ" (Code) để chạy max tốc độ.
+
+```mermaid
+graph TD
+    subgraph OOP ["OOP: Virtual Call Hell (Tắc Nghẽn)"]
+        direction TB
+        OOP_Mem[("RAM (Heap Rải Rác)")]
+        L1i_OOP["L1i Cache\n(Tràn Code)"]:::fail
+        L1d_OOP["L1d Cache\n(Miss Data)"]:::fail
+        CPU_OOP["CPU Core\n(STALL)"]:::stall
+        
+        OOP_Mem -.-> |"Code: Zombie, Orc..."| L1i_OOP
+        OOP_Mem -.-> |"Data: Mảng trỏ lung tung"| L1d_OOP
+        L1i_OOP --> CPU_OOP
+        L1d_OOP --> CPU_OOP
+    end
+
+    subgraph DOD ["DOD/ECS: Linear Access (Thông Thoáng)"]
+        direction TB
+        DOD_Mem[("RAM (Contiguous Chunk)")]
+        L1i_DOD["L1i Cache\n(1 System Code)"]:::pass
+        L1d_DOD["L1d Cache\n(Liền mạch)"]:::pass
+        CPU_DOD["CPU Core\n(MAX SPEED)"]:::run
+
+        DOD_Mem ==> |"Code: Chỉ 1 hàm System"| L1i_DOD
+        DOD_Mem ==> |"Data: Prefetching"| L1d_DOD
+        L1i_DOD ==> CPU_DOD
+        L1d_DOD ==> CPU_DOD
+    end
+
+    classDef fail fill:#ffcdd2,stroke:#c62828,color:#b71c1c
+    classDef stall fill:#cfd8dc,stroke:#455a64,color:#263238,stroke-dasharray: 5,5
+    classDef pass fill:#c8e6c9,stroke:#2e7d32,color:#1b5e20
+    classDef run fill:#fff9c4,stroke:#fbc02d,color:#f57f17,font-weight:bold
+```
 
 > **🌟 Ứng dụng (Programming Takeaway):**
 > Hiểu được tại sao **Data-Oriented Design (DOD)** tách biệt **Data** và **Logic**:
@@ -1746,29 +1748,21 @@ DRAM Cell — 1 bit = 1 Transistor + 1 Tụ điện:
   → Dùng cho: RAM chính (DDR4, DDR5)
 ```
 
-### 8.3. So sánh trực quan
+### 8.3. So sánh trực quan (DRAM vs SRAM)
 
-```
-┌───────────────────────────────────────────────────────────────────┐
-│          SRAM vs DRAM — Cùng lưu 1 bit, khác hoàn toàn           │
-├───────────────┬──────────────────┬────────────────────────────────┤
-│               │     SRAM         │         DRAM                  │
-├───────────────┼──────────────────┼────────────────────────────────┤
-│ Transistor    │ 6 / bit          │ 1 / bit + 1 tụ điện           │
-│ Tốc độ       │ ~1 ns            │ ~50-100 ns                    │
-│ Chi phí       │ $$$$             │ $                              │
-│ Cần Refresh?  │ Không            │ Có (mỗi ~64ms)               │
-│ Dung lượng    │ MB (nhỏ)         │ GB (lớn)                     │
-│ Vị trí       │ Trên chip CPU    │ Chip riêng trên mainboard      │
-│ Vai trò      │ L1/L2/L3 Cache   │ RAM chính (DDR5)              │
-├───────────────┴──────────────────┴────────────────────────────────┤
-│                                                                   │
-│  Ẩn dụ:                                                           │
-│  SRAM = Ngăn kéo bàn làm việc (nhỏ, lấy ngay, đắt)              │
-│  DRAM = Tủ hồ sơ ở góc phòng (lớn, phải đứng dậy đi lấy, rẻ)   │
-│                                                                   │
-└───────────────────────────────────────────────────────────────────┘
-```
+| Đặc điểm | DRAM (RAM máy tính) | SRAM (Cache L1/L2/L3, Register) |
+| :--- | :--- | :--- |
+| **Linh kiện chính** | Tụ điện (Capacitor) | Flip-Flop (Transistor) |
+| **Cơ chế giữ bit** | Lưu điện tích (như pin sạc) | Mạch chốt điện áp (như công tắc) |
+| **Độ bền dữ liệu** | Bị mất dần (Rò rỉ) | Ổn định mãi mãi (nếu có điện) |
+| **Hành động bắt buộc** | Phải **Refresh** liên tục | Không cần làm gì |
+| **Mật độ tích hợp** | Cao (1 bit = 1T + 1C) | Thấp (1 bit = 6T) |
+| **Tốc độ** | Chậm (do phải nạp/xả tụ) | Cực nhanh |
+| **Giá thành** | Rẻ | Rất đắt |
+
+> **Ẩn dụ:**
+> *   **SRAM = Ngăn kéo bàn:** Nhanh, tiện, nhưng không chứa được nhiều (đắt).
+> *   **DRAM = Kho lưu trữ:** Rộng mênh mông, rẻ, nhưng mỗi lần lấy đồ phải đi bộ (Refresh/Access Time).
 
 ## 9. Cache — Bộ đệm thay đổi cuộc chơi
 
