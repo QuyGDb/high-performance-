@@ -375,7 +375,58 @@ GPU ẩn latency bằng: CHUYỂN SANG WARP KHÁC
 
 ---
 
-## 4. Rendering Pipeline — Từ Draw Call đến Pixel
+## 4. Giao tiếp CPU ↔ GPU & "Gót chân Von Neumann"
+
+### 4.1. Von Neumann Bottleneck — "Bức tường Bộ nhớ" (Memory Wall)
+
+Kiến trúc máy tính hiện đại vẫn dựa trên mô hình Von Neumann: **CPU/GPU tách biệt hoàn toàn với Bộ nhớ (RAM/VRAM)**.
+
+```
+VẤN ĐỀ:
+  Tốc độ tính toán của Core (ALU) tăng trưởng ~50%/năm.
+  Tốc độ truyền tải của Bus (dây dẫn) chỉ tăng ~10%/năm.
+
+  → Hiện tượng: "Procesor is fast, Memory is slow."
+  → CPU/GPU dành 90% thời gian để CHỜ dữ liệu từ RAM.
+  → Đây chính là "Gót chân Von Neumann" (Memory Wall).
+```
+
+### 4.2. Hạ tầng PCIe — Nút thắt cổ chai vật lý
+
+Dữ liệu đi từ CPU (RAM) sang GPU (VRAM) phải đi qua **PCIe Bus**.
+
+```
+So sánh Bandwidth (Băng thông):
+  - Bên trong GPU (VRAM ↔ L2): ~500 - 1000 GB/s (GDDR6X/HBM3)
+  - Giữa CPU và GPU (PCIe 4.0 x16): ~32 GB/s
+  - Giữa CPU và GPU (PCIe 5.0 x16): ~64 GB/s
+
+  → Kết luận: Con đường PCIe hẹp hơn nội bộ GPU gấp 20-30 lần!
+  → Quy tắc vàng: Hạn chế tối đa việc gửi dữ liệu qua lại giữa CPU và GPU trong mỗi frame.
+```
+
+### 4.3. Command Buffer & Ring Buffer — Cách "nói chuyện"
+
+CPU và GPU không nói chuyện trực tiếp. Chúng giao tiếp qua một "Hộp thư" (Mailbox).
+
+1.  **Command Buffer (CPU soạn thảo):**
+    *   CPU (Driver) viết một danh sách các lệnh (SetTexture, DrawCall, ...) vào một vùng nhớ RAM đặc biệt.
+2.  **Ring Buffer (Dây chuyền sản xuất):**
+    *   GPU liên tục "quét" vùng nhớ này theo vòng tròn (Ring).
+    *   GPU đọc lệnh nào thì thực hiện lệnh đó (In-Order).
+3.  **Driver (Thông dịch viên):**
+    *   Dịch mã C# Unity (Graphics.DrawMesh) thành mã nhị phân mà phần cứng GPU cụ thể (NVIDIA/AMD) hiểu được.
+
+### 4.4. Giải pháp hiện đại: Phá vỡ bức tường
+
+Để vượt qua giới hạn Von Neumann, các công nghệ mới đang xóa nhòa ranh giới:
+*   **Unified Memory (Apple Silicon M1/M2/M3):** CPU và GPU dùng chung 1 bể RAM duy nhất. Không còn tốn thời gian "copy" qua PCIe.
+*   **HBM (High Bandwidth Memory):** Chồng chip nhớ trực tiếp lên trên GPU die để rút ngắn khoảng cách vật lý của dây dẫn.
+*   **DirectStorage / RTX IO:** GPU tự đọc dữ liệu từ SSD mà không cần "nhờ" CPU copy hộ.
+
+---
+
+## 5. Rendering Pipeline — Từ Draw Call đến Pixel
 
 ### 4.1. Tổng quan luồng dữ liệu
 
@@ -561,7 +612,7 @@ Từ CPU đến Màn hình — Toàn bộ pipeline:
 
 ---
 
-## 5. Draw Calls & Batching — CPU↔GPU Communication
+## 6. Draw Calls & Batching — CPU↔GPU Communication
 
 ### 5.1. Draw Call là gì?
 
@@ -659,7 +710,7 @@ Ví dụ DrawMeshInstancedIndirect (GPU-Driven Pipeline):
 
 ---
 
-## 6. Tile-Based Rendering — Kiến trúc GPU Mobile
+## 7. Tile-Based Rendering — Kiến trúc GPU Mobile
 
 ### 6.1. IMR vs TBR
 
@@ -724,7 +775,7 @@ MSAA trên TBR vs IMR:
 
 ---
 
-## 7. Compute Shaders — GPU không chỉ render
+## 8. Compute Shaders — GPU không chỉ render
 
 ### 7.1. GPGPU trong Unity
 
@@ -783,7 +834,7 @@ Thread Group = Tương đương Warp/Wavefront:
 
 ---
 
-## 8. Shader Optimization — Quy tắc vàng
+## 9. Shader Optimization — Quy tắc vàng
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐

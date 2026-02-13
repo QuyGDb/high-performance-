@@ -22,10 +22,10 @@
   - [6. Flip-flop — Viên gạch đầu tiên của Bộ nhớ](#6-flip-flop-—-viên-gạch-đầu-tiên-của-bộ-nhớ)
   - [7. Từ Flip-flop → Register → Register File](#7-từ-flip-flop--register--register-file)
   - [8. SRAM vs DRAM — Hai cách xây bộ nhớ từ Transistor](#8-sram-vs-dram-—-hai-cách-xây-bộ-nhớ-từ-transistor)
-  - [9. Cache — Bộ đệm thay đổi cuộc chơi](#9-cache-—-bộ-đệm-thay-đổi-cuộc-chơi)
-  - [10. Cache Associativity — Dữ liệu nằm ở đâu trong Cache?](#10-cache-associativity-—-dữ-liệu-nằm-ở-đâu-trong-cache)
-  - [11. Cache Coherency — Vấn đề đa lõi](#11-cache-coherency-—-vấn-đề-đa-lõi)
-  - [12. Kết nối Unity — Cache Locality là tất cả](#12-kết-nối-unity-—-cache-locality-là-tất-cả)
+  - [9. Cache – Bộ đệm thay đổi cuộc chơi (The Game Changer)](#9-cache-–-bộ-đệm-thay-đổi-cuộc-chơi-the-game-changer)
+  - [10. Cache Associativity – Dữ liệu nằm ở đâu?](#10-cache-associativity-–-dữ-liệu-nằm-ở-đâu)
+  - [11. Cache Coherency – Vấn đề "Tam sao thất bản" ở Đa lõi](#11-cache-coherency-–-vấn-đề-tam-sao-thất-bản-ở-đa-lõi)
+  - [12. Kết nối Unity - Cache Locality là TẤT CẢ](#12-kết-nối-unity---cache-locality-là-tất-cả)
   - [11. Tổng kết Chapter 2](#11-tổng-kết-chapter-2)
 
 ---
@@ -1736,561 +1736,664 @@ DRAM Cell — 1 bit = 1 Transistor + 1 Tụ điện:
 > *   **SRAM = Ngăn kéo bàn:** Nhanh, tiện, nhưng không chứa được nhiều (đắt).
 > *   **DRAM = Kho lưu trữ:** Rộng mênh mông, rẻ, nhưng mỗi lần lấy đồ phải đi bộ (Refresh/Access Time).
 
-## 9. Cache — Bộ đệm thay đổi cuộc chơi
+## 9. Cache – Bộ đệm thay đổi cuộc chơi (The Game Changer)
 
-### 9.1. Tại sao cần Cache?
+Chào mừng bạn đến với phần "thực chiến" nhất của kiến trúc máy tính. Đây là những kiến thức phân định giữa một lập trình viên bình thường và một kỹ sư tối ưu hóa hiệu năng (đặc biệt trong Game Dev với Unity/C++).
 
-```
-Tốc độ qua các thế hệ (1980 → nay):
+Tại sao Cache lại quan trọng đến mức "thay đổi cuộc chơi"? Bởi vì có một sự chênh lệch khủng khiếp giữa tốc độ CPU và RAM, gọi là **"Bức tường bộ nhớ" (Memory Wall)**.
 
-  CPU Speed:     ████████████████████████████████████████  ×10,000 lần
-  RAM Speed:     █████████                                 ×100 lần
+*   **CPU:** Xử lý 1 phép tính mất ~0.3 nano giây (ở 3GHz).
+*   **RAM:** Lấy dữ liệu mất ~100 nano giây.
 
-  → "Memory Wall": CPU phải CHỜ RAM hàng trăm chu kỳ.
-     Mỗi chu kỳ chờ = lãng phí hàng tỷ phép tính/giây.
-```
+Nếu không có Cache, CPU sẽ phải chờ RAM 99.7% thời gian. Cache sinh ra để làm cầu nối: Nó nhỏ, đắt, nhưng cực nhanh.
 
-Giải pháp = Cache (Bộ đệm SRAM nằm trên chip CPU):
+> [!IMPORTANT]
+> **Quy tắc vàng:** Dữ liệu càng gần CPU thì càng nhanh.
 
-```mermaid
-graph TD
-    subgraph CPU_Die ["CPU DIE (Nằm trực tiếp trên Chip)"]
-        direction TB
-        subgraph Core0 ["Core 0"]
-            L1_0["L1 Cache\n(32-64 KB)\n~0.5ns / 4 cycles"]:::fast
-            L2_0["L2 Cache\n(256 KB - 1 MB)\n~3ns / 12 cycles"]:::mid
-            L1_0 --- L2_0
-        end
+| Cấp độ | Tốc độ | Đặc điểm |
+| :--- | :--- | :--- |
+| **L1 Cache** | 1-3 chu kỳ | Nhanh như điện, nằm sát Core. |
+| **L2 Cache** | 10-12 chu kỳ | Vừa phải, mỗi Core thường có riêng. |
+| **L3 Cache** | 50-70 chu kỳ | Chậm hơn chút, nhưng dùng chung cho tất cả các Core. |
+| **RAM** | 200-300 chu kỳ | Rất chậm so với tốc độ xử lý của CPU. |
 
-        subgraph Core1 ["Core 1"]
-            L1_1["L1 Cache\n(32-64 KB)\n~0.5ns / 4 cycles"]:::fast
-            L2_1["L2 Cache\n(256 KB - 1 MB)\n~3ns / 12 cycles"]:::mid
-            L1_1 --- L2_1
-        end
-
-        L3["<b>L3 Cache (Shared)</b>\n(2 - 64+ MB)\n~15ns / 40+ cycles"]:::shared
-        
-        L2_0 --- L3
-        L2_1 --- L3
-    end
-
-    RAM[("<b>DDR5 RAM (DRAM)</b>\n(16 - 128+ GB)\n~100ns / 200+ cycles")]:::slow
-    
-    L3 <==> |"Memory Bus"| RAM
-
-    %% Styling
-    classDef fast fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,font-weight:bold
-    classDef mid fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
-    classDef shared fill:#e1bee7,stroke:#8e24aa,stroke-width:3px,color:#4a148c
-    classDef slow fill:#eceff1,stroke:#455a64,stroke-dasharray: 5 5
-```
-
-#### Kim tự tháp Memory Hierarchy
-
-```mermaid
-graph TD
-    %% Pyramid Structure
-    REG["<b>Registers</b><br/>(Dưới 1 KB)<br/>0.2 ns"]:::p1
-    L1["<b>L1 Cache</b><br/>(Vài chục KB)<br/>0.5 ns"]:::p2
-    L2["<b>L2 Cache</b><br/>(Vài trăm KB)<br/>3-10 ns"]:::p3
-    L3["<b>L3 Cache</b><br/>(Vài MB)<br/>20-40 ns"]:::p4
-    RAM["<b>RAM (Main Memory)</b><br/>(16-64 GB)<br/>100 ns"]:::p5
-    SSD["<b>SSD / Disk</b><br/>(TB)<br/>Hàng nghìn ns"]:::p6
-
-    REG --- L1 --- L2 --- L3 --- RAM --- SSD
-
-    %% Labels
-    note1[/"<b>TỐC ĐỘ / GIÁ THÀNH TĂNG</b>"/]:::up
-    note2[/"<b>DUNG LƯỢNG TĂNG</b>"/]:::down
-
-    %% Styling
-    classDef p1 fill:#d32f2f,color:#fff,stroke:#b71c1c
-    classDef p2 fill:#f44336,color:#fff,stroke:#c62828
-    classDef p3 fill:#ef5350,color:#fff,stroke:#e53935
-    classDef p4 fill:#e57373,color:#fff,stroke:#ef5350
-    classDef p5 fill:#ef9a9a,color:#000,stroke:#e57373
-    classDef p6 fill:#ffcdd2,color:#000,stroke:#ef9a9a
-    
-    classDef up fill:none,stroke:#d32f2f,stroke-width:2px,color:#d32f2f
-    classDef down fill:none,stroke:#1976d2,stroke-width:2px,color:#1976d2
-```
-
-### 9.2. Cache Line — Đơn vị truyền dữ liệu cơ bản
+### 9.1. Cache Line — Đơn vị truyền dữ liệu cơ bản
 
 **Đây là khái niệm QUAN TRỌNG NHẤT cho hiệu năng Unity DOTS.**
 
-```
-CPU KHÔNG BAO GIỜ đọc 1 byte đơn lẻ từ RAM.
-Nó luôn đọc 1 CACHE LINE = 64 BYTES.
-
-Ví dụ: Bạn truy cập array[0] (4 bytes int):
-
-```mermaid
-graph LR
-    subgraph RAM_Layout ["RAM (Tổ chức theo dòng 64 Bytes)"]
-        direction LR
-        B0["Int[0]\n(4B)"]:::target
-        B1["Int[1]\n(4B)"]:::neighbor
-        B2["Int[2]\n(4B)"]:::neighbor
-        B3["Int[3]\n(4B)"]:::neighbor
-        Dots["..."]:::neighbor
-        B15["Int[15]\n(4B)"]:::neighbor
-        
-        B0 --- B1 --- B2 --- B3 --- Dots --- B15
-    end
-
-    subgraph L1_Cache ["L1 Cache Slot (Dân chơi vác cả bó)"]
-        Slot["Slot 64B mới nạp"]:::cache
-    end
-
-    B0 -.-> |"1. Bạn chỉ xin Int[0]"| Slot
-    RAM_Layout ==> |"2. CPU vác nguyên 64B về cất"| Slot
-
-    classDef target fill:#e3f2fd,stroke:#1565c0,font-weight:bold
-    classDef neighbor fill:#f5f5f5,stroke:#9e9e9e
-    classDef cache fill:#fff9c4,stroke:#fbc02d,stroke-width:2px
-```
-
-Bạn chỉ cần [0], nhưng CPU tải TOÀN BỘ 64 bytes vào L1 Cache.
-  → [1] đến [15] đã có sẵn trong Cache → truy cập miễn phí!
-
+CPU KHÔNG BAO GIỜ đọc 1 byte đơn lẻ từ RAM. Nó luôn đọc 1 **CACHE LINE = 64 BYTES**.
 
 Hệ quả:
-  ┌──────────────────────────────────────────────────────────────┐
-  │  NẾU bạn duyệt array TUẦN TỰ ([0], [1], [2], ...):        │
-  │    → Cache Hit gần 100% (chỉ 1 lần tải / 16 phần tử)      │
-  │    → CỰC NHANH                                              │
-  │                                                              │
-  │  NẾU bạn duyệt array NGẪU NHIÊN ([7], [1023], [3], ...):  │
-  │    → Cache Miss liên tục (mỗi truy cập = tải cache line mới)│
-  │    → CỰC CHẬM (100-300× chậm hơn!)                         │
-  └──────────────────────────────────────────────────────────────┘
-```
+- **NẾU bạn duyệt array TUẦN TỰ ([0], [1], [2], ...):** Cache Hit gần 100% (chỉ 1 lần tải / 16 phần tử int). → **CỰC NHANH**.
+- **NẾU bạn duyệt array NGẪU NHIÊN ([7], [1023], [3], ...):** Cache Miss liên tục (mỗi truy cập = tải cache line mới). → **CỰC CHẬM** (100-300× chậm hơn!).
 
-### 9.3. Ví dụ thực tế: Cache Hit vs Miss
-
-#### > Under the Hood: Tại sao Random chậm?
-Hãy nhìn vào Assembly của vòng lặp:
-
-```asm
-; Vòng lặp tính tổng (Simplified x86)
-Loop_Start:
-    MOV  RBX, [IndexArr + RCX*4]   ; 1. Tải index ngẫu nhiên từ mảng IndexArr
-                                   ;    (Nếu lặp tuần tự, Index có sẵn trong L1)
-
-    MOV  EAX, [DataArr + RBX*4]    ; 2. Dùng index đó để tải Data
-                                   ;    ⚠️ CACHE MISS LỚN Ở ĐÂY!
-                                   ;    Vì RBX nhảy lung tung, CPU không đoán được.
-                                   ;    CPU phải DỪNG (Stall) ~300 cycles để đợi RAM.
-
-    ADD  SUM, EAX                  ; 3. Cộng (chỉ mất 1 cycle)
-    INC  RCX                       ; 4. Tăng đếm
-    CMP  RCX, 1000000
-    JNE  Loop_Start
-```
-*   **Sequential:** Dòng 2 luôn trúng Cache (Hit) vì CPU tự động prefetch dòng tiếp theo.
-*   **Random:** Dòng 2 trượt Cache (Miss) liên tục. Lệnh `ADD` ở dòng 3 không thể chạy cho đến khi dòng 2 xong. CPU ngồi chơi 99% thời gian!
-
-```
-Bài toán: Tính tổng 1 triệu số (1,000,000 ints = ~4 MB)
-
-═══ Kịch bản 1: Duyệt tuần tự (Sequential) ═══
-
-  for (int i = 0; i < 1000000; i++)
-      sum += data[i];    // Cache Hit 15/16 lần = 93.75%
-
-  Phân tích:
-  - Tải cache line chứa data[0..15] → ~100 cycles   (Miss)
-  - Đọc data[0]: 0 cycles  (Hit)
-  - Đọc data[1]: 0 cycles  (Hit)
-  - ...
-  - Đọc data[15]: 0 cycles (Hit)
-  - Tải cache line chứa data[16..31] → ~100 cycles  (Miss)
-  - ... lặp lại
-
-  Tổng thời gian: ~62,500 cache misses × 100 cycles = ~6.25M cycles
-  Tốc độ thực tế: ★★★★★ CỰC NHANH
-
-
-═══ Kịch bản 2: Duyệt ngẫu nhiên (Random) ═══
-
-  for (int i = 0; i < 1000000; i++)
-      sum += data[random_index[i]];    // Cache Miss ~100%
-
-  Phân tích:
-  - Mỗi random_index chỉ đến vị trí khác nhau trong 4MB
-  - 4MB >> L1 Cache (64KB) → gần như mọi truy cập đều Miss
-  - 1,000,000 misses × 100 cycles = ~100M cycles
-
-  Tốc độ thực tế: ★☆☆☆☆ CHẬM GẤP 16 LẦN!
-```
+> [!NOTE]
+> **Deep Dive: Tại sao lại là 64 bytes?**
+> Tại sao các kỹ sư Intel/AMD không chọn 16 bytes hay 1024 bytes? Đây là kết quả của việc cân bằng "Tỉ lệ vàng":
+> 1. **DRAM Burst (Cơ chế truyền theo đợt):** Việc gửi địa chỉ từ CPU đến RAM rất tốn thời gian. Để tối ưu, RAM được thiết kế theo kiểu: "Gửi 1 địa chỉ, trả về 8 phần dữ liệu liên tiếp" (**Burst Length = 8**). Với bus dữ liệu 64-bit (8 bytes), một "đợt nổ" dữ liệu này sẽ chuyển vừa khít 64 bytes (8x8). 64 bytes là "điểm ngọt" (Sweet Spot) hoàn hảo: nhỏ hơn sẽ lãng phí công gửi địa chỉ, lớn hơn sẽ làm chậm thời gian phản hồi.
+> 2. **Tag Overhead:** Mỗi Cache Line cần một nhãn (Tag) để ghi nhớ địa chỉ. Nếu Line quá nhỏ (ví dụ 4 bytes), bộ nhớ dùng để chứa Tag sẽ chiếm quá nhiều diện tích chip.
+> 3. **Spatial Locality vs False Sharing:** 64 bytes đủ lớn để chứa các biến "hàng xóm" thường dùng chung (như struct `Position`), nhưng cũng đủ nhỏ để tránh việc 2 Core CPU vô tình tranh chấp cùng một dòng Cache (False Sharing).
 
 ---
 
-## 10. Cache Associativity — Dữ liệu nằm ở đâu trong Cache?
+## 10. Cache Associativity – Dữ liệu nằm ở đâu?
 
-### 10.1. Ba cách tổ chức Cache
+Khi CPU cần tìm biến A (địa chỉ 0x12345), làm sao nó biết A đang nằm ở đâu trong Cache L1? Nó có phải lật tung cả cái Cache lên để tìm không?
 
-#### 1. Direct Mapped (Ánh xạ trực tiếp)
-Mỗi địa chỉ RAM chỉ có THỂ nằm ở **1 vị trí cố định** trong Cache.
+Không! Việc tìm kiếm phải diễn ra tức thì. Để làm được điều đó, người ta chia Cache thành các ngăn (Set) theo quy luật toán học (Hash). Có 3 cách tổ chức chính:
 
-```mermaid
-graph LR
-    subgraph RAM
-        B0[Block 0]:::ram
-        B4[Block 4]:::ram
-        B8[Block 8]:::ram
-    end
-    
-    subgraph Cache [Cache Lines]
-        L0[Line 0]:::conflict
-        L1[Line 1]:::cache
-    end
+### A. Direct Mapped (Ánh xạ trực tiếp) - "Mỗi người một ghế"
+- **Quy tắc:** Địa chỉ 0x12345 BẮT BUỘC phải nằm ở ngăn số 5.
+- **Ưu điểm:** Tìm cực nhanh (chỉ cần ngó vào ngăn số 5).
+- **Nhược điểm:** Nếu bạn cần dùng cả biến B (cũng có địa chỉ trỏ vào ngăn số 5), hai biến này sẽ đá nhau ra liên tục (**Cache Thrashing**), dù các ngăn khác đang trống.
 
-    B0 --> L0
-    B4 -.->|Conflict!| L0
-    B8 -.->|Conflict!| L0
+### B. Fully Associative (Liên kết đầy đủ) - "Ngồi đâu cũng được"
+- **Quy tắc:** Dữ liệu có thể nằm ở bất kỳ đâu.
+- **Ưu điểm:** Không bao giờ bị xung đột vị trí. Tận dụng 100% dung lượng.
+- **Nhược điểm:** Khi tìm, CPU phải so sánh địa chỉ với toàn bộ các dòng trong Cache cùng lúc. Mạch điện cực phức tạp và tốn điện.
 
-    classDef ram fill:#e1f5fe,stroke:#01579b
-    classDef cache fill:#e8f5e9,stroke:#2e7d32
-    classDef conflict fill:#ffcdd2,stroke:#c62828
-```
-
-- ✅ **Ưu:** Đơn giản, rẻ, nhanh nhất (do không cần tìm kiếm).
-- ❌ **Nhược:** **Conflict Miss**. Nếu chương trình cần dùng cả Block 0 và Block 4 cùng lúc, chúng sẽ đá nhau liên tục khỏi Line 0.
-
-#### 2. Fully Associative (Liên kết hoàn toàn)
-Mỗi block RAM có thể nằm ở **BẤT KỲ** cache line nào.
-
-- ✅ **Ưu:** Không bao giờ có Conflict Miss (trừ khi cache đầy).
-- ❌ **Nhược:** Phải so sánh tag với **TOÀN BỘ** cache lines song song → Mạch điện cực phức tạp, tốn điện. Chỉ dùng cho cache siêu nhỏ (như TLB).
-
-#### 3. Set-Associative (N-way) — Phổ biến nhất
-Cache chia thành các **Sets**. Block RAM thuộc về 1 Set cố định, nhưng có thể nằm ở **bất kỳ Way** nào trong Set đó.
-
-**Ví dụ: 4-Way Set Associative**
-(Block 0, 4, 8 đều thuộc Set 0, nhưng Set 0 có 4 chỗ chứa)
-
-```mermaid
-graph LR
-    subgraph RAM
-        B0[Blk 0]:::ram
-        B4[Blk 4]:::ram
-        B8[Blk 8]:::ram
-    end
-
-    subgraph Set0 ["Set 0 - 4 Ways"]
-        direction TB
-        W0[Way 0: Blk 0]:::cache
-        W1[Way 1: Blk 4]:::cache
-        W2[Way 2: Blk 8]:::cache
-        W3[Way 3: Trống]:::empty
-    end
-
-    B0 --> W0
-    B4 --> W1
-    B8 --> W2
-
-    classDef ram fill:#e1f5fe,stroke:#01579b
-    classDef cache fill:#fff9c4,stroke:#fbc02d
-    classDef empty fill:#f5f5f5,stroke:#bdbdbd,stroke-dasharray: 5 5
-```
-
-- ✅ **Cân bằng:** Giảm conflict miss đáng kể mà không quá đắt đỏ như Fully Associative.
-- 💡 **Thực tế:** L1 thường là 8-way, L2 là 16-way.
-
-### 9.4. Cache trong Pipeline — "Cửa hàng tiện lợi" nằm ở đâu?
-
-Caches không đứng một mình mà đan xen trực tiếp vào 5 giai đoạn của Pipeline. Đây là cách chúng phối hợp:
-
-```mermaid
-flowchart LR
-    %% stages
-    IF["<b>① FETCH</b>\n(Lấy lệnh)"]:::stage
-    ID["<b>② DECODE</b>\n(Giải mã)"]:::stage
-    EXE["<b>③ EXECUTE</b>\n(Tính toán)"]:::stage
-    MEM["<b>④ MEMORY</b>\n(Đọc/Ghi data)"]:::stage
-    WB["<b>⑤ WRITEBACK</b>\n(Ghi Reg)"]:::stage
-
-    %% Caches
-    L1i[("<b>L1i Cache</b>\n(Instruction)")]:::cache_box
-    L1d[("<b>L1d Cache</b>\n(Data)")]:::cache_box
-    L2[("<b>L2 / L3 Cache</b>\n(Shared Backstop)")]:::backstop
-
-    %% Connections
-    IF <--> |"Query Code"| L1i
-    MEM <--> |"Query Data"| L1d
-    
-    L1i -.-> |"Miss"| L2
-    L1d -.-> |"Miss"| L2
-    
-    IF --> ID --> EXE --> MEM --> WB
-
-    %% Styling
-    classDef stage fill:#e3f2fd,stroke:#1565c0,font-weight:bold
-    classDef cache_box fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
-    classDef backstop fill:#f5f5f5,stroke:#9e9e9e,stroke-dasharray: 5 5
-```
-
-**Chi tiết quy trình:**
-
-1.  **Stage 1 - FETCH: Gõ cửa L1i**
-    *   CPU dùng Program Counter (PC) để hỏi **L1i Cache**: "Có lệnh ở địa chỉ này không?".
-    *   **Hit:** Lệnh được nạp vào ngay trong 0.5ns. Pipeline chạy tiếp.
-    *   **Miss:** CPU phải đợi L2/L3 hoặc RAM trả code về. Pipeline **Stall** (tắc nghẽn).
-
-2.  **Stage 4 - MEMORY: Gõ cửa L1d**
-    *   Sau khi tính toán xong địa chỉ ở Stage 3, Stage 4 sẽ hỏi **L1d Cache**: "Lấy/Ghi dữ liệu ở đây cho tôi".
-    *   Đây là nơi các mảng (Array), Struct (Component) trong Unity ECS được truy cập.
-    *   **Hit:** Dữ liệu có sẵn -> Cực nhanh.
-    *   **Miss:** CPU phải đợi RAM (~100ns) -> Gây ra **Data Hazard** mà ta đã học ở Section 5.
-
-3.  **L2/L3 Cache: Quản gia chung**
-    *   Nếu L1i hoặc L1d không có thứ CPU cần, chúng sẽ nhìn xuống L2. L2 to hơn nhưng chậm hơn 1 chút. Nếu hụt cả L3 thì mới phải "đi bộ" ra RAM.
-
-> **💡 Kết nối Game Dev:** Khi bạn duyệt một `NativeArray` tuần tự, Stage 4 (MEMORY) sẽ "Hit" cache liên tục vì CPU đã tải sẵn cả Cache Line vào L1d. Nếu bạn truy cập kiểu `Random`, Stage 4 sẽ "Miss" liên tục, làm cả Pipeline 5 bước phải dừng lại chờ RAM.
-
-> **🎯 Ẩn dụ — Tủ khóa Ký túc xá:**
-> - **Direct Mapped** = Mỗi sinh viên được gán **đúng 1 tủ cố định** (theo số MSSV). Nếu 2 SV cùng hash về 1 tủ → tranh nhau, phải luân phiên bỏ đồ ra.
-> - **Fully Associative** = Sinh viên được chọn **BẤT KỲ tủ nào trống**. Tuyệt vời! Nhưng mỗi lần tìm đồ phải mở **TẤT CẢ** tủ để check → chậm.
-> - **Set-Associative (4-way)** = Mỗi SV được gán **1 dãy (set) gồm 4 tủ**. Chọn tủ nào trống trong dãy đó. Tìm đồ chỉ cần check 4 tủ thay vì hàng trăm → cân bằng hoàn hảo!
+### C. N-way Set Associative (Liên kết tập hợp) - "Giải pháp tối ưu"
+Đây là cách các CPU hiện đại (Intel/AMD) dùng. Ví dụ: **8-way Set Associative**.
+- Cache được chia thành nhiều ngăn (Set).
+- Mỗi ngăn có 8 chỗ ngồi (Way).
+- Địa chỉ 0x12345 bắt buộc vào Ngăn số 5, nhưng có thể ngồi ở bất kỳ ghế nào trong 8 ghế đó.
+- **Kết quả:** Cân bằng hoàn hảo giữa tốc độ tìm kiếm và khả năng chống xung đột.
 
 ---
 
-## 11. Cache Coherency — Vấn đề đa lõi
+## 11. Cache Coherency – Vấn đề "Tam sao thất bản" ở Đa lõi
 
-### 11.1. False Sharing — "Kẻ thù giấu mặt" của đa luồng
+Mỗi Core CPU có Cache L1 riêng. Điều này dẫn đến vấn đề:
+1. Core 1 đọc biến `Score = 10` vào L1 của nó.
+2. Core 2 cũng đọc `Score = 10` vào L1 của nó.
+3. Core 1 cập nhật `Score = 20` (nhưng chỉ mới lưu trong L1 của Core 1).
+4. Core 2 đọc lại Score, nó vẫn thấy số 10 cũ rích trong L1 của mình!
 
-```
-Kịch bản:
-  2 lõi CPU cùng truy cập mảng counters[], nhưng TRÊ2 phần tử khác nhau.
+→ **Lỗi Logic nghiêm trọng (Incoherency).**
 
-  struct Counters {
-      public int countA;  // Core 0 dùng
-      public int countB;  // Core 1 dùng
-  }
-  // sizeof(Counters) = 8 bytes
-  // Cả countA và countB nằm trên CÙNG 1 cache line (64 bytes)!
+### Giải pháp: Giao thức MESI (Snooping)
+Các Core không chỉ làm việc, chúng còn "nghe lỏm" (**Snoop**) trên đường Bus chung.
+- Khi Core 1 sửa Score, nó báo hiệu trên Bus: "Tao sửa thằng Score rồi nhé!".
+- Core 2 nghe thấy, lập tức đánh dấu dòng Cache chứa Score của mình là **Invalid** (Hết hạn).
+- Lần tới khi Core 2 cần Score, nó buộc phải xuống L3 hoặc RAM để lấy giá trị mới nhất (20).
 
-
-  Core 0                           Core 1
-  ──────                           ──────
-  countA++                         countB++
-     │                                │
-     ▼                                ▼
-  ┌─────────────────────────────────────────────────┐
-  │  Cache Line (64 bytes):                         │
-  │  [countA=1] [countB=0] [padding...............]  │
-  └─────────────────────────────────────────────────┘
-     │                                │
-     │  "Tôi sửa cache line này!"    │  "Tôi CŨNG sửa cache line này!"
-     │                                │
-     ▼                                ▼
-  MESI Protocol bắt buộc:
-  1. Core 0 ghi countA → đánh dấu cache line = "Modified"
-  2. Core 1 muốn ghi countB → phải INVALIDATE cache line ở Core 0
-  3. Core 0 flush cache line về L3 → Core 1 tải lại từ L3
-  4. Core 1 ghi countB → đánh dấu "Modified"
-  5. Core 0 muốn ghi countA lần nữa → lại phải invalidate...
-  
-  → PING-PONG liên tục! Mỗi lần = ~40-100 cycles wasted
-  → Hiệu năng GIẢM tới 10-100× so với dùng 1 lõi!
-```
-
-> **🎯 Ẩn dụ — 2 người viết cùng 1 trang vở:**
-> Tưởng tượng 2 người ngồi 2 bàn, mỗi người viết **ở GÓC RIÊNG** của cùng 1 trang giấy.
-> - Người A viết góc trái → xong, đưa trang giấy cho Người B.
-> - Người B viết góc phải → xong, đưa lại cho Người A.
-> - Dù họ **KHÔNG CHẠM vào chữ của nhau**, nhưng vì cùng 1 trang giấy (= cùng 1 Cache Line), họ phải **chuyền qua chuyền lại** liên tục.
-> - **Giải pháp:** Cho mỗi người viết trên **TRANG RIÊNG** (= padding để tách cache line) → không cần chờ nhau nữa!
-
-**Giải pháp: Đệm (Padding) để tách cache line**
-
-```csharp
-struct CountersPadded {
-    public int countA;
-    // 60 bytes padding → đẩy countB sang cache line khác
-    fixed byte _pad[60];
-    public int countB;
-}
-
-// Hoặc trong Unity DOTS:
-// [NativeDisableContainerSafetyRestriction]
-// → Đặt dữ liệu của mỗi Job trên chunk riêng biệt
-```
-
-### 11.2. MESI Protocol — Quy ước đồng bộ Cache
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│  MESI = 4 trạng thái của mỗi Cache Line                     │
-│                                                              │
-│  M (Modified):   Chỉ core này có data MỚI NHẤT              │
-│                  RAM đã lỗi thời (phải ghi lại khi evict)   │
-│                                                              │
-│  E (Exclusive):  Chỉ core này có, nhưng GIỐNG với RAM       │
-│                  Có thể chuyển sang M mà không báo ai       │
-│                                                              │
-│  S (Shared):     NHIỀU cores đều có copy giống nhau          │
-│                  Muốn ghi → phải invalidate các core khác   │
-│                                                              │
-│  I (Invalid):    Cache line này KHÔNG HỢP LỆ                │
-│                  Phải tải lại từ L3/RAM nếu cần             │
-│                                                              │
-│  Chuyển trạng thái:                                          │
-│  I ──Read──► E ──Write──► M                                  │
-│  E ──Other core reads──► S                                   │
-│  S ──Write──► M (+ Invalidate others → I)                    │
-│  M ──Other core reads──► S (+ Flush to L3)                   │
-└──────────────────────────────────────────────────────────────┘
-```
+> [!NOTE]
+> Việc đồng bộ này (Sync) tốn thời gian. Nếu bạn viết code để 2 Core cùng ghi liên tục vào 2 biến nằm cạnh nhau (trên cùng 1 Cache Line), hiệu năng sẽ tụt thảm hại do hiện tượng **False Sharing**.
 
 ---
 
-## 12. Kết nối Unity — Cache Locality là tất cả
+## 12. Kết nối Unity - Cache Locality là TẤT CẢ
 
-### 12.1. MonoBehaviour vs ECS — Câu chuyện Cache Line
+Tại sao Unity chuyển sang DOTS (Data-Oriented Tech Stack) và ECS? Tại sao Class chậm hơn Struct? Câu trả lời nằm ở **Cache Locality** (Tính cục bộ).
 
-**═══ Classic MonoBehaviour (OOP) — Cache NIGHTMARE ═══**
+### Kịch bản 1: OOP truyền thống (Object Oriented)
+Bạn có `List<Monster>`, mỗi `Monster` là một Class (Reference Type).
+- Dữ liệu thực của Monster 1 nằm ở địa chỉ 0xA000.
+- Dữ liệu Monster 2 nằm ở 0xF000 (cách rất xa vì cấp phát ngẫu nhiên trên Heap).
+- **Kết quả:** Khi vòng lặp chạy từ Monster 1 sang 2, CPU không tìm thấy Monster 2 trong Cache. Nó bị **Cache Miss** và phải đợi RAM. Đây gọi là **"Pointer Chasing"** (Đuổi bắt con trỏ) - Kẻ thù của hiệu năng.
 
-```csharp
-class Enemy : MonoBehaviour {
-    Vector3 position;     // 12 bytes
-    float health;          // 4 bytes
-    string name;           // 8 bytes (reference)
-    Rigidbody rb;          // 8 bytes (reference)
-    Animator animator;     // 8 bytes (reference)
-    // ... + MonoBehaviour overhead = ~100+ bytes
-}
-```
+### Kịch bản 2: DOD (Data Oriented - Unity DOTS)
+Bạn dùng `NativeArray<MonsterData>`, mỗi `MonsterData` là một Struct (Value Type).
+- Struct được xếp liên tiếp nhau trong bộ nhớ: `[Mon1][Mon2][Mon3]...`
+- Khi CPU nạp Mon1, nó nạp luôn cả Mon2, Mon3 vào Cache Line (vì nằm ngay cạnh).
+- **Kết quả:** Vòng lặp chạy cực nhanh vì dữ liệu luôn có sẵn trong L1 Cache (**Cache Hit**).
 
-```
-Bộ nhớ Heap (rời rạc, ngẫu nhiên):
-  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐
-  │Enemy[0]│  │ String │  │Enemy[1]│  │ Sound  │
-  │ @0x100 │  │ @0x280 │  │ @0x500 │  │ @0x390 │
-  └────────┘  └────────┘  └────────┘  └────────┘
-       ↑           ↑           ↑           ↑
-  Cache Line A  Cache Line E  Cache Line I  Cache Line G
+> [!TIP]
+> **Tối ưu trong Unity:**
+> 1. Dùng **Struct** (blittable types) thay vì Class cho dữ liệu số lượng lớn.
+> 2. Dùng **Array** (NativeArray) thay vì List/LinkedList.
+> 3. Sắp xếp dữ liệu để tận dụng tối đa 64 Bytes mỗi lần nạp.
 
-  Duyệt Enemy[0] → Cache Miss (tải Line A)
-  Duyệt Enemy[1] → Cache Miss (tải Line I)  ← KHÁC cache line!
-  Duyệt Enemy[2] → Cache Miss (ở đâu đó khác trên Heap)
-
-  → Cứ MỖI enemy = 1 Cache Miss = 200 cycles wasted
-  → 10,000 enemies = 2,000,000 cycles wasted = ~0.4ms ở 5GHz
-     (Chưa kể pointer chasing: position → rb → collider → ...)
-```
-
-#### > The Pointer Chasing Problem (Assembly):
-Để lấy `enemy.transform.position`, CPU phải "săn tìm địa chỉ" (pointer chasing):
-
-```asm
-MOV  R1, [EnemyAddress]        ; Tải địa chỉ object Enemy
-MOV  R2, [R1 + TransformOffset]; Tải địa chỉ Transform component (CACHE MISS?)
-MOV  R3, [R2 + PositionOffset] ; Tải dữ liệu Position (CACHE MISS?)
-```
-
-- Tệ hại: Lệnh 2 **PHỤ THUỘC** vào R1 từ lệnh 1. Lệnh 3 **PHỤ THUỘC** vào R2 từ lệnh 2.
-- CPU không thể "chạy trước" (Instruction Level Parallelism).
-- Nếu lệnh 1 Miss Cache, lệnh 2 và 3 phải đợi → **Chuỗi dây chuyền thảm họa.**
+Đó chính là bí mật đằng sau việc ECS có thể xử lý 100.000 unit cùng lúc mà vẫn mượt, trong khi cách code cũ chỉ chịu được 5.000 unit.
 
 ---
-
-**═══ Unity ECS (DOD) — Cache PARADISE ═══**
-
-```csharp
-struct Position : IComponentData { public float3 Value; }  // 12 bytes
-struct Health : IComponentData { public float Value; }       // 4 bytes
-```
-
-```
-Archetype Chunk (16 KB, contiguous):
-  ┌──────────────────────────────────────────────────────────────┐
-  │ Position Data (liên tục):                                    │
-  │ [pos0][pos1][pos2][pos3][pos4][pos5]...[pos659]              │
-  │  12B   12B   12B   12B   12B   12B      12B                 │
-  │ ◄──── Cache Line (64B) = 5 positions ────►                  │
-  │                                                              │
-  │ Health Data (liên tục):                                      │
-  │ [hp0][hp1][hp2][hp3][hp4][hp5]...[hp659]                    │
-  │  4B   4B   4B   4B   4B   4B      4B                        │
-  │ ◄──── Cache Line (64B) = 16 healths ────►                   │
-  └──────────────────────────────────────────────────────────────┘
-
-  Duyệt Position:
-  - Tải cache line → có 5 positions miễn phí!
-  - Cache Hit 4/5 = 80%
-  - 10,000 entities ÷ 5 per line = 2,000 misses
-  - 2,000 × 100 cycles = 200,000 cycles = ~0.04ms
-
-  → ECS nhanh hơn MonoBehaviour ~10× chỉ nhờ Cache Locality!
-```
-
-### 12.2. Tại sao NativeArray không có GC?
-
-**C# Managed Array** (`new int[]`):
-- Cấp phát trên **Managed Heap**
-- GC phải quét (scan) để biết array còn dùng không
-- GC có thể **DI CHUYỂN** array (compaction) → địa chỉ thay đổi
-- Không thể dùng trong Burst (Burst cần địa chỉ cố định cho SIMD)
-
-**NativeArray\<int\>:**
-- Cấp phát trên **Unmanaged Heap** (qua `Marshal.AllocHGlobal` hoặc `UnsafeUtility`)
-- GC **KHÔNG BIẾT** nó tồn tại → Zero GC pressure
-- Địa chỉ **CỐ ĐỊNH** → Burst dùng trực tiếp cho SIMD
-- Developer **PHẢI tự Dispose()** → nếu quên = Memory Leak
-
-```
-  ┌─────────────────────────────────────────────────────┐
-  │  Managed Heap (GC quản lý):                         │
-  │  [string] [List<T>] [MonoBehaviour] [GameObject]    │
-  │  ↑ GC scan toàn bộ vùng này định kỳ                │
-  ├─────────────────────────────────────────────────────┤
-  │  Unmanaged Heap (Dev tự quản lý):                   │
-  │  [NativeArray] [NativeList] [NativeHashMap]         │
-  │  ↑ GC KHÔNG CHẠM vào vùng này                      │
-  │  ↑ Burst Compiler truy cập TRỰC TIẾP               │
-  └─────────────────────────────────────────────────────┘
-```
-
-### 12.3. Allocator Types — Chọn đúng tầng bộ nhớ
-
-| Allocator | Mô tả | Ưu/Nhược | Dùng cho |
-|---|---|---|---|
-| **`Allocator.Temp`** | Stack-like, xóa cuối frame | ✅ Cực nhanh (không lock) · ❌ Chỉ sống 1 frame | Kết quả tạm trong `Update()` |
-| **`Allocator.TempJob`** | Sống qua nhiều frame, tự xóa sau 4 frame | ✅ An toàn cho Jobs · ❌ Không quá lâu dài | `IJobParallelFor` data |
-| **`Allocator.Persistent`** | Sống đến khi bạn `Dispose()` | ✅ Dài hạn · ❌ Chậm hơn, PHẢI tự Dispose | Lookup tables, spatial hash |
-
----
-
-## 11. Tổng kết Chapter 2
-
-```
-Chuỗi tiến hóa bộ nhớ:
-
-  2 NOR Gates (8 transistors) → SR Latch (nhớ 1 bit)
-       │
-       ▼
-  D Flip-flop (nhớ 1 bit theo nhịp Clock)
-       │
-       ▼
-  32 D-FF = 1 Register (nhớ 1 số 32-bit)
-       │
-       ▼
-  SRAM (6T/bit) → L1/L2/L3 Cache (nhanh, đắt, nhỏ)
-       │
-       ▼
-  DRAM (1T+1C/bit) → DDR5 RAM (chậm hơn, rẻ, lớn)
-       │
-       ▼
-  NAND Flash → SSD (rất chậm, rất rẻ, rất lớn)
-```
-
 > **Bài học quan trọng nhất:**
 > - Không phải **thuật toán nào nhanh hơn** mà là **dữ liệu nào gần CPU hơn**.
 > - `O(n)` tuần tự trên Cache nhanh hơn `O(log n)` nhảy ngẫu nhiên trên RAM.
 > - Unity ECS nhanh không phải vì ECS "thông minh hơn", mà vì nó **đặt dữ liệu đúng chỗ** để CPU Cache hoạt động hiệu quả nhất.
 
 ---
+
+## 1. Stack vs. Heap — Trận chiến của Tốc độ và Linh hoạt
+
+Câu trả lời ngắn gọn: Stack và Heap "sống" chính thức ở trong RAM, nhưng các phần "đang nóng" (Hot) của chúng sẽ được copy tạm thời vào Cache.
+
+> **Tưởng tượng:**
+> *   **RAM:** Kho tổng (Chứa toàn bộ).
+> *   **L1/L2:** Bàn làm việc của CPU (Chứa cái đang dùng).
+
+### 1.1. Stack — "Khách VIP" của L1 Cache
+Stack chứa các biến cục bộ (`int i`, `float x`) và thông tin hàm đang chạy.
+
+*   **Vị trí thường trú:** **L1d Cache (Data Cache)**.
+*   **Tại sao Stack lại được ưu ái?**
+    1.  **Tính liên tục (Spatial Locality):** Stack hoạt động như một chồng đĩa. Dữ liệu luôn được thêm vào (push) hoặc lấy ra (pop) ở cùng một chỗ. Các biến nằm sát sạt nhau → Cache Line nạp một phát được cả đống biến.
+    2.  **Kích thước nhỏ:** Một Stack Frame chỉ vài chục bytes → Vừa khít trong vài dòng Cache Line.
+    3.  **Truy cập liên tục (Temporal Locality):** Bạn vừa khai báo `i`, dòng sau đã `i++`. CPU dùng nó liên tục.
+*   **Kết luận:** Đỉnh của Stack (nơi code đang chạy) gần như **100% nằm trong L1 Cache**. Đây là lý do truy cập biến local nhanh khủng khiếp (1-3 cycles).
+
+### 1.2. Heap — "Kẻ lang thang" (Rải rác từ L1 đến RAM)
+Heap là nơi chứa các Object to lớn (`new Class`, `List<T>`, `Texture`...).
+
+*   **Vị trí thường trú:** Rải rác khắp nơi (L1, L2, L3, RAM).
+*   **Tại sao Heap chậm?**
+    1.  **Phân mảnh (Fragmentation):** Khi bạn `new Object()`, nó tìm chỗ trống bất kỳ để nhét vào. Object A ở đầu làng, Object B (con của A) ở cuối xóm.
+    2.  **Kích thước lớn:** Một Texture hay Array lớn không thể nhét vừa L1 (chỉ 32-48KB). Nó buộc phải tràn xuống L2, L3.
+    3.  **Pointer Chasing (Đuổi bắt con trỏ):** Đọc A (có trong L1) → Lấy địa chỉ B → Nhảy đến B (Chưa nạp??) → **Cache Miss** → Phải lục lọi xuống L2/L3/RAM.
+
+### Bảng so sánh hành vi trong Cache
+
+| Đặc điểm | Stack (Ngăn xếp) | Heap (Bộ nhớ động) |
+| :--- | :--- | :--- |
+| **Dữ liệu** | Biến cục bộ, tham số hàm | Object, mảng lớn, tài nguyên game |
+| **Cách xếp** | **Xếp gạch** (Liền tù tì) | **Xếp lộn xộn** (Chỗ nào trống thì nhét) |
+| **Ưu tiên Cache** | **Cực cao** (Khách VIP của L1) | **Thấp hơn** (Thường bị đẩy xuống L2/L3) |
+| **Tốc độ** | Siêu nhanh (Gần như tức thì) | Chậm (Chờ nạp RAM nếu xui) |
+| **Cache Miss** | Rất hiếm | **Rất thường xuyên** (nhất là Linked List/Class) |
+
+---
+
+## 2. Stack & Function Calls — Cái giá của mỗi lần gọi hàm
+
+### 2.1. Call Stack — Cách CPU quản lý hàm
+
+Đầu tiên, hãy phân biệt hai khái niệm dễ nhầm lẫn:
+*   **Stack (Vùng nhớ Stack):** Là cả một "nhà kho" bộ nhớ khổng lồ dành cho việc gọi hàm.
+*   **Stack Frame (Khung bộ nhớ hàm):** Là một "ngôi nhà" riêng biệt được tạo ra bên trong Stack **mỗi khi một hàm được gọi**. Khi hàm kết thúc, "ngôi nhà" này bị phá dỡ.
+
+> **Ẩn dụ:**
+> *   **Stack = Một chồng khay:** Cả chồng khay là Stack.
+> *   **Stack Frame = Một chiếc khay:** Mỗi chiếc khay chứa đồ ăn cho một người (một hàm). Ăn xong thì nhấc khay đó ra.
+
+```mermaid
+graph TD
+    subgraph "Stack Memory (Vùng nhớ Stack)"
+        direction BT
+        Frame1["Stack Frame 1: GameLoop()<br>(Bottom of Stack)"]
+        Frame2["Stack Frame 2: Update()<br>(Middle)"]
+        Frame3["Stack Frame 3: CalculateDamage()<br>(Top of Stack - Active)"]
+        
+        Frame3 --> Frame2
+        Frame2 --> Frame1
+    end
+
+    RSP[Register RSP] -.-> Frame3
+    note[Stack grows DOWNWARDS<br>towards lower addresses] -.-> Frame3
+```
+
+```
+C# code:
+  void GameLoop() {
+      float dmg = CalculateDamage(10, 5);
+      ApplyDamage(enemy, dmg);
+  }
+  float CalculateDamage(int baseDmg, int level) {
+      return baseDmg * (1 + level * 0.1f);
+  }
+
+
+Assembly flow (đơn giản hóa):
+
+  GameLoop:
+      PUSH  RBP                    ; Lưu Base Pointer cũ lên Stack
+      MOV   RBP, RSP               ; Set Base Pointer mới = đỉnh Stack
+      SUB   RSP, 16                ; Dành chỗ cho local variables
+
+      MOV   ECX, 10                ; Arg 1: baseDmg = 10
+      MOV   EDX, 5                 ; Arg 2: level = 5
+      CALL  CalculateDamage        ; ← Push Return Address + Jump
+
+      ; ... khi CalculateDamage return, kết quả nằm trong XMM0 ...
+      
+      MOV   RSP, RBP               ; Khôi phục Stack
+      POP   RBP                    ; Khôi phục Base Pointer
+      RET                          ; Pop Return Address + Jump back
+
+
+Stack Memory khi đang trong CalculateDamage():
+
+  Địa chỉ cao  ┌──────────────────────────┐
+               │  ... (GameLoop caller)    │
+               ├──────────────────────────┤
+               │  Return Address (RIP cũ) │ ← CPU tự push khi CALL
+               ├──────────────────────────┤
+       RBP ──► │  Old RBP (GameLoop)      │ ← Nơi quay lại
+               ├──────────────────────────┤
+               │  local var: baseDmg = 10 │
+               ├──────────────────────────┤
+       RSP ──► │  local var: level = 5    │ ← Đỉnh Stack hiện tại
+               ├──────────────────────────┤
+               │  (Space trống — grow ↓)  │
+  Địa chỉ thấp └──────────────────────────┘
+
+  Khi RET:
+  1. Pop return address
+  2. Jump về GameLoop
+  3. Khôi phục RBP/RSP
+  → Stack Frame bị "hủy" (chỉ di chuyển pointer, KHÔNG xóa data)
+```
+
+### 2.2. Inlining — Loại bỏ chi phí gọi hàm
+
+```
+Chi phí mỗi CALL:
+  1. PUSH return address        (~1 cycle)
+  2. Push/Pop registers to save (~2-4 cycles)
+  3. Pipeline flush (partial)   (~5-10 cycles)
+  4. Return bookkeeping         (~1-2 cycles)
+  ───────────────────────────────────────────
+  Tổng: ~10-15 cycles overhead MỖI LẦN gọi hàm
+
+Với 10,000 entities × 5 hàm/entity = 50,000 calls
+→ 50,000 × 12 = 600,000 cycles wasted = ~0.12ms ở 5GHz
+
+
+═══ Giải pháp: Inlining ═══
+
+Compiler thay thế CALL bằng cách COPY code của hàm vào caller:
+
+  Trước Inline:                    Sau Inline:
+  ──────────────                   ────────────
+  void Update() {                  void Update() {
+      float d = CalcDmg(10, 5);       // CalcDmg "paste" trực tiếp:
+      Apply(enemy, d);                 float d = 10 * (1 + 5 * 0.1f);
+  }                                    Apply(enemy, d);
+                                   }
+  float CalcDmg(int b, int l) {
+      return b * (1 + l * 0.1f);   → Không có CALL/RET overhead
+  }                                → Burst/IL2CPP có thể tối ưu thêm
+                                     (constant folding: d = 15.0f)
+
+
+Unity & Inlining:
+  ┌──────────────────────────────────────────────────────────────┐
+  │  Mono JIT:   Inline rất hạn chế (hàm <32 bytes IL)          │
+  │  IL2CPP:     Inline tốt hơn (C++ compiler quyết định)       │
+  │  Burst:      Inline CỰC KỲ aggressive                       │
+  │              + Tự vectorize sau khi inline                   │
+  │              → Đây là lý do Burst nhanh hơn Mono 5-20×      │
+  │                                                              │
+  │  Tip: Đánh dấu [MethodImpl(MethodImplOptions.AggressiveInlining)] │
+  │  để gợi ý compiler inline (không bắt buộc, compiler quyết)  │
+  └──────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 3. Từ C# đến Mã máy — Ba con đường trong Unity
+
+### 3.1. Con đường Mono (JIT — Just-In-Time)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  CON ĐƯỜNG MONO — Dùng trong Unity Editor & Development        │
+│                                                                 │
+│  1. Viết code C# (.cs files)                                    │
+│     │                                                           │
+│     ▼                                                           │
+│  2. Roslyn Compiler biên dịch → IL bytecode (.dll files)        │
+│     │    (Xảy ra khi bạn nhấn Ctrl+S hoặc Domain Reload)       │
+│     │                                                           │
+│     │    IL bytecode — Ví dụ:                                   │
+│     │    .method void Update() {                                │
+│     │        ldarg.0                  ; load "this"             │
+│     │        ldfld float3 position    ; load position           │
+│     │        ldarg.0                                            │
+│     │        ldfld float3 velocity    ; load velocity           │
+│     │        ldsfld float deltaTime   ; load Time.deltaTime     │
+│     │        mul                      ; velocity * dt           │
+│     │        add                      ; position + result       │
+│     │        stfld float3 position    ; store back              │
+│     │    }                                                      │
+│     │                                                           │
+│     ▼                                                           │
+│  3. Mono Runtime JIT compile:                                    │
+│     - Lần đầu gọi Update() → compile IL → x86-64 native        │
+│     - Kết quả cache trong memory (không compile lại)             │
+│     - Lần gọi sau: chạy native code trực tiếp                   │
+│     │                                                           │
+│     │  ⚠ Vấn đề JIT:                                           │
+│     │  - Lần gọi đầu tiên CHẬM (JIT stutter / hiccup)          │
+│     │  - JIT compiler phải NHANH → không đủ thời gian optimize  │
+│     │  - Kết quả: native code CHƯA tối ưu bằng AOT             │
+│     │                                                           │
+│     ▼                                                           │
+│  4. Native Code chạy trên CPU                                   │
+│                                                                 │
+│  ✅ Ưu điểm: Iterate nhanh (Save → Play ngay)                   │
+│  ❌ Nhược điểm: Runtime performance kém hơn IL2CPP/Burst        │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+> [!NOTE]
+> **Mono JIT vs. .NET CLR JIT (RyuJIT) — Khác nhau thế nào?**
+>
+> Nhiều bạn thắc mắc: "Tại sao Unity không dùng cái JIT xịn sò của .NET Core?"
+>
+> | Đặc điểm | Mono JIT (Unity / Xamarin) | CLR JIT (RyuJIT - .NET Core) |
+> | :--- | :--- | :--- |
+> | **Triết lý** | **Portable (Di động).** Chạy được trên mọi CPU lạ đời (MIPS, SPARC, ARM cũ...). Ưu tiên tốn ít RAM. | **Performance (Hiệu năng).** Tối ưu hóa tối đa cho Server và Desktop (x64, ARM64). Ưu tiên tốc độ xử lý. |
+> | **Cơ chế JIT** | **Compile Once.** Dịch một lần, dùng mãi mãi. (Gần đây mới bắt đầu có Tiered). | **Tiered Compilation.** Dịch nháp để chạy ngay -> Theo dõi -> Dịch lại bản xịn hơn (Re-optimizing). |
+> | **SIMD (Vector)** | Hỗ trợ kém hoặc cần thư viện riêng (`Unity.Mathematics`). | **Cực tốt.** Tự động dùng AVX/SSE để tính toán song song nhiều dữ liệu. |
+> | **Garbage Collector** | SGen / Boehm. Đơn giản, dễ bị khựng (Stop-the-world lâu hơn). | **Generational GC.** Cực kỳ phức tạp, chia vùng (Server/Workstation), dọn rác song song cực mượt. |
+> | **Khởi động** | **Chậm hơn** (do phải JIT kỹ ngay từ đầu). | **Nhanh hơn** (nhờ Tier 0 compilation). |
+> | **Throughput** | Trung bình. Thua xa CLR ở các tác vụ tính toán nặng. | **Rất cao.** Thường nhanh hơn Mono từ 2x đến 10x tùy tác vụ. |
+>
+> **Tương lai:** Unity đang chuyển dần sang **CoreCLR** để tận dụng sức mạnh của .NET hiện đại, nhưng hiện tại Editor vẫn chủ yếu dựa vào Mono.
+
+### 3.2. Con đường IL2CPP (AOT — Ahead-of-Time)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  CON ĐƯỜNG IL2CPP — Dùng cho Production Builds                  │
+│                                                                 │
+│  1. C# → IL (giống Mono)                                        │
+│     │                                                           │
+│     ▼                                                           │
+│  2. IL2CPP Transpiler:                                           │
+│     Chuyển IL bytecode → C++ source code                         │
+│     │                                                           │
+│     │  Ví dụ output C++:                                        │
+│     │  void Update_m1234(MyScript_t* __this) {                  │
+│     │      float3 vel = __this->velocity;                       │
+│     │      float dt = Time_get_deltaTime();                     │
+│     │      float3 delta;                                        │
+│     │      delta.x = vel.x * dt;                                │
+│     │      delta.y = vel.y * dt;                                │
+│     │      delta.z = vel.z * dt;                                │
+│     │      __this->position.x += delta.x;                       │
+│     │      __this->position.y += delta.y;                       │
+│     │      __this->position.z += delta.z;                       │
+│     │  }                                                        │
+│     │                                                           │
+│     ▼                                                           │
+│  3. Platform C++ Compiler:                                       │
+│     ┌─────────────────────────────────────────────────────┐     │
+│     │  Windows: MSVC (cl.exe)     → x86-64 .exe          │     │
+│     │  macOS:   Clang (Apple)     → ARM64 .app            │     │
+│     │  Android: NDK Clang         → ARM64 .so             │     │
+│     │  iOS:     Clang (Xcode)     → ARM64 .ipa            │     │
+│     │  WebGL:   Emscripten        → WASM .wasm            │     │
+│     └─────────────────────────────────────────────────────┘     │
+│     │                                                           │
+│     │  C++ compiler có HÀNG GIỜ để optimize:                    │
+│     │  - Loop unrolling                                         │
+│     │  - Dead code elimination                                  │
+│     │  - Constant propagation                                   │
+│     │  - Auto-vectorization (một phần)                          │
+│     │  - Link-Time Optimization (LTO)                           │
+│     │                                                           │
+│     ▼                                                           │
+│  4. Highly optimized native binary                               │
+│                                                                 │
+│  ✅ Performance gần C++ thuần                                    │
+│  ✅ Code stripping giảm build size                               │
+│  ❌ Build time lâu (phải compile C++)                            │
+│  ❌ Debug khó hơn (native stack traces)                          │
+│  📱 BẮT BUỘC cho iOS (Apple cấm JIT)                            │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### 3.2.1. Deep Dive: Tại sao IL2CPP mà không phải .NET Native AOT?
+
+Nhiều người hỏi: "Tại sao Unity phải khổ sở dịch sang C++ mà không dùng luôn AOT của Microsoft?"
+Câu trả lời nằm ở 3 yếu tố: **Lịch sử, Console và Game**.
+
+1.  **Vấn đề Lịch sử ("Trâu chậm uống nước đục"):**
+    *   Unity cần AOT cho iOS từ **2014** (do Apple cấm JIT). Lúc đó .NET AOT chưa ra đời.
+    *   Microsoft .NET Native AOT mới thực sự ổn định gần đây (2022). Unity không thể chờ 8 năm được.
+
+2.  **Vấn đề "Vua Cổng" (Portability):**
+    *   **Console (PS5, Switch, Xbox):** SDK của các hãng này hỗ trợ **C++** cực tốt, nhưng **KHÔNG** hỗ trợ .NET Runtime.
+    *   **Chiến thuật:** Unity chuyển C# thành C++, sau đó ném cho trình biên dịch của Sony/Nintendo xử lý. Đây là cách duy nhất để chạy trên mọi nền tảng mà không cần viết lại Runtime cho từng máy.
+
+3.  **Code Stripping & Debugging:**
+    *   **.NET Native AOT:** Cắt code (Trim) rất mạnh tay, dễ làm crash game dùng nhiều Reflection (JSON, DI).
+    *   **IL2CPP:** Có cơ chế "Managed Stripping" thông minh hơn, giữ lại metadata cần thiết cho Game Engine hoạt động.
+    *   **Debug:** Khi crash trên Android/Console, bạn có thể debug code C++ sinh ra bằng Android Studio/Xcode.
+
+#### 3.2.2. Unity 6 & CoreCLR — Bước tiến mới
+
+Unity 6 update **CoreCLR**, nhưng điều này **KHÔNG** có nghĩa là bỏ IL2CPP để qua .NET AOT.
+
+*   **Trong Editor:** Thay thế Mono JIT cũ kỹ bằng **CoreCLR JIT (RyuJIT)**.
+    *   ✅ GC xịn hơn (Generational GC) → Editor mượt hơn, ít giật.
+    *   ✅ Import Asset nhanh hơn.
+    *   ✅ Hỗ trợ C# mới nhất.
+*   **Khi Build Game (Player):**
+    *   **Desktop:** Có thể chọn CoreCLR JIT.
+    *   **Mobile / Console:** Vẫn **BẮT BUỘC** dùng **IL2CPP**.
+
+> **Tóm lại:** IL2CPP vẫn là "vũ khí tối thượng" để Unity thống trị thế giới đa nền tảng. CoreCLR giúp trải nghiệm Dev sướng hơn, nhưng không thay thế được vai trò của IL2CPP trên Console.
+
+### 3.3. Con đường Burst (AOT + SIMD — Cao cấp nhất)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  CON ĐƯỜNG BURST — Dành cho DOTS (ECS + Job System)             │
+│                                                                 │
+│  1. C# HPC# (High-Performance C#)                               │
+│     │  Subset giới hạn của C#:                                  │
+│     │  ✅ struct, NativeArray, math.*, fixed arrays              │
+│     │  ❌ class, string, List<T>, LINQ, virtual, delegates       │
+│     │  ❌ try/catch, reflection, GC allocations                  │
+│     │                                                           │
+│     ▼                                                           │
+│  2. IL (giống Mono/IL2CPP)                                       │
+│     │                                                           │
+│     ▼                                                           │
+│  3. Burst Compiler (LLVM Backend):                               │
+│     │                                                           │
+│     │  Burst = Custom LLVM frontend cho C#                      │
+│     │  Sử dụng CÙNG backend optimizer như Clang/C++ compiler!   │
+│     │                                                           │
+│     │  Tối ưu hóa đặc biệt của Burst:                          │
+│     │  ┌────────────────────────────────────────────────────┐   │
+│     │  │ ✅ Auto-Vectorization (SIMD)                       │   │
+│     │  │    → Tự chuyển scalar loop → SIMD instructions    │   │
+│     │  │                                                    │   │
+│     │  │ ✅ Loop Vectorization                              │   │
+│     │  │    → for (i=0..N) → xử lý 4/8/16 phần tử/loop    │   │
+│     │  │                                                    │   │
+│     │  │ ✅ Bounds Check Elimination                        │   │
+│     │  │    → Xóa [i] bounds check khi Burst chứng minh    │   │
+│     │  │      index luôn hợp lệ                             │   │
+│     │  │                                                    │   │
+│     │  │ ✅ Alias Analysis                                  │   │
+│     │  │    → Chứng minh 2 NativeArrays KHÔNG overlap      │   │
+│     │  │    → Cho phép tối ưu mạnh hơn                     │   │
+│     │  │                                                    │   │
+│     │  │ ✅ Constant Folding                                │   │
+│     │  │    → math.sin(0) → 0 tại compile time              │   │
+│     │  │                                                    │   │
+│     │  │ ✅ Aggressive Inlining                             │   │
+│     │  │    → Inline GẦN NHƯ TẤT CẢ hàm nhỏ               │   │
+│     │  └────────────────────────────────────────────────────┘   │
+│     │                                                           │
+│     ▼                                                           │
+│  4. Platform-specific native code:                               │
+│     - x86-64: SSE4.2 / AVX2 / AVX-512                           │
+│     - ARM64:  NEON / SVE                                         │
+│     - WASM:   SIMD128 (WebGL/WebGPU)                             │
+│                                                                 │
+│  ✅ Hiệu năng NGANG hoặc HƠN C++ hand-optimized                │
+│  ✅ An toàn hơn C++ (safety checks ở Editor, remove ở Build)    │
+│  ✅ Compile nhanh (vài giây cho Jobs)                            │
+│  ❌ Chỉ dùng được HPC# subset                                   │
+│  ❌ Không dùng được MonoBehaviour, strings, classes               │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 3.4. So sánh ba con đường — Benchmark thực tế
+
+```
+Bài test: Di chuyển 100,000 entities (position += velocity * dt)
+
+┌───────────────┬──────────────┬────────┬──────────────────────────┐
+│  Pipeline     │  Thời gian   │ So vs  │  Lý do                   │
+│               │  (ms/frame)  │ Mono   │                          │
+├───────────────┼──────────────┼────────┼──────────────────────────┤
+│ Mono (JIT)    │  ~8.5 ms     │  1×    │ Scalar, bounds checks,   │
+│               │              │        │ GC overhead, no SIMD     │
+├───────────────┼──────────────┼────────┼──────────────────────────┤
+│ IL2CPP (AOT)  │  ~3.2 ms     │  2.7×  │ C++ optimizer, inline,   │
+│               │              │        │ minor auto-vectorize     │
+├───────────────┼──────────────┼────────┼──────────────────────────┤
+│ Burst (AOT    │  ~0.4 ms     │  21×   │ Full SIMD (AVX2),        │
+│  + SIMD)      │              │        │ no bounds checks,        │
+│               │              │        │ perfect cache (ECS),     │
+│               │              │        │ ScheduleParallel (8 cores│
+│               │              │        │ × 8-wide SIMD = 64×)     │
+├───────────────┼──────────────┼────────┼──────────────────────────┤
+│ Burst +       │  ~0.05 ms    │  170×  │ Burst + Job System       │
+│ Parallel Jobs │              │        │ trên 8 cores             │
+└───────────────┴──────────────┴────────┴──────────────────────────┘
+
+Tại sao chênh lệch LỚN đến vậy?
+
+  Mono:   scalar math (1 entity/lệnh) + bounds check + GC scan
+  Burst:  SIMD math (8 entities/lệnh) + no checks + no GC
+  + Jobs: chia 100K entities cho 8 cores
+          = 100K ÷ 8 cores ÷ 8 SIMD = ~1,562 iterations/core
+          thay vì 100,000 iterations trên 1 core
+```
+
+```
+
+---
+
+## 3.5. Deep Dive: Process vs. Thread vs. Core — Nhà máy, Công nhân & Đầu bếp
+
+Để tối ưu hóa game, bạn cần hiểu rõ ai là người thực thi mã lệnh của mình. Đây là sự khác biệt cốt lõi:
+
+### 1. Process (Tiến trình) — "Cái Nhà Máy"
+Khi bạn click đúp vào biểu tượng Game, hệ điều hành xây dựng một **Process**.
+*   **Tài nguyên:** Được cấp riêng RAM (Heap), Code Segment.
+*   **Đặc điểm:**
+    *   **Nặng nề:** Tốn nhiều tài nguyên để tạo mới.
+    *   **Cách ly:** Nhà máy A bị cháy (Crash) thì Nhà máy B bên cạnh vẫn hoạt động bình thường.
+
+### 2. Thread (Luồng) — "Người Công Nhân"
+Trong nhà máy (Process) phải có ít nhất 1 công nhân làm việc (**Main Thread**).
+*   **Mối quan hệ:** "Sống ký sinh" vào Process. Process chết, tất cả Thread chết theo.
+*   **Bộ nhớ:**
+    *   **Heap (Kho chung):** Tất cả Thread dùng chung. Dễ xảy ra tranh chấp (**Race Condition**).
+    *   **Stack (Bàn làm việc riêng):** Mỗi Thread có một Stack riêng biệt. Biến cục bộ của ai người nấy dùng (An toàn).
+*   **Rủi ro:** Một Thread bị lỗi Memory Access Violation → Cả Process bị OS diệt sạch.
+
+### 3. Core (Nhân vật lý) — "Đầu Bếp"
+Rất nhiều người lầm tưởng Thread = Core. Sai lầm!
+*   **Core (Phần cứng):** Là người đầu bếp trực tiếp nấu ăn.
+*   **Thread (Phần mềm):** Là tờ phiếu Order (danh sách việc phải làm).
+*   **Cơ chế:**
+    *   **Concurrency (Đa nhiệm giả):** 1 Core thay phiên nhau xử lý 100 Thread (Context Switch cực nhanh).
+    *   **Hyper-Threading (Siêu phân luồng):** 1 Core vật lý có 2 "bếp lò" (Logical Cores). Trong lúc chờ RAM tải dữ liệu cho Thread A, nó tranh thủ làm Thread B.
+
+### 4. Áp dụng trong Unity
+*   **Main Thread:** "Công nhân trưởng". Chạy `Update()`, `Start()`, xử lý Input, Render. Chỉ có ông này mới được phép đụng vào `GameObject`, `Transform` (Unity API không Thread-Safe).
+*   **Worker Threads:** Các công nhân phụ (do `Job System` hoặc `Task.Run` tạo ra). Dùng để tính toán nặng (AI, Pathfinding) nhằm giảm tải cho Main Thread.
+    *   **Lưu ý:** Cấm Worker Thread đụng vào GameObject (vì GameObject nằm trên Heap chung không có khóa bảo vệ).
+
+> **Lời khuyên:** Đừng spam Thread (`new Thread()`). Hãy dùng **Unity Job System**, nó sẽ tự động tạo ra số lượng Worker Thread vừa khít với số Core của máy để tránh lãng phí thời gian Context Switch.
+
+---
+
+## 4. Garbage Collection — "Stop the World"
+
+### 4.1. GC hoạt động như thế nào?
+
+```
+┌───────────────────────────────────────────────────────────────────┐
+│              GARBAGE COLLECTOR (Boehm GC trong Unity)             │
+│                                                                   │
+│  Managed Heap:                                                    │
+│  ┌─────┬─────┬█████┬─────┬█████┬─────┬─────┬█████┬─────┐        │
+│  │ Obj │ Obj │DEAD │ Obj │DEAD │ Obj │ Obj │DEAD │ Obj │        │
+│  │  A  │  B  │  C  │  D  │  E  │  F  │  G  │  H  │  I  │        │
+│  └─────┴─────┴█████┴─────┴█████┴─────┴─────┴█████┴─────┘        │
+│                                                                   │
+│  GC Cycle:                                                        │
+│  1. STOP THE WORLD — Tất cả C# code DỪNG LẠI                     │
+│     (Game freeze! Player thấy "giật")                             │
+│                                                                   │
+│  2. MARK Phase:                                                   │
+│     Bắt đầu từ "GC Roots" (static fields, stack variables)       │
+│     Đi theo tất cả references → đánh dấu objects "sống"          │
+│     Objects không được đánh dấu = "chết" (garbage)                │
+│                                                                   │
+│  3. SWEEP Phase:                                                  │
+│     Giải phóng bộ nhớ của objects "chết"                           │
+│     (Boehm GC KHÔNG di chuyển objects — không compact)            │
+│                                                                   │
+│  4. RESUME — Code tiếp tục chạy                                   │
+│                                                                   │
+│  Thời gian GC: 1-20ms tùy heap size                               │
+│  Ở 60 FPS: 1 frame = 16.67ms                                      │
+│  → GC 5ms = mất 30% thời gian frame → GIẬT!                      │
+└───────────────────────────────────────────────────────────────────┘
+
+
+Các "tội đồ" tạo GC trong Unity:
+
+  ┌──────────────────────────────┬──────────────────────────────────┐
+  │  Code thường gặp             │  Tạo GC bao nhiêu?              │
+  ├──────────────────────────────┼──────────────────────────────────┤
+  │  string name = "HP: " + hp;  │  ~100 bytes / frame (nối string)│
+  │  new List<int>()             │  ~80 bytes (list object + array) │
+  │  GetComponent<T>()           │  ~40 bytes (boxing/wrapper)      │
+  │  LINQ (.Where, .Select)      │  ~200+ bytes (iterator objects)  │
+  │  foreach (List<T>)           │  ~40 bytes (enumerator object)   │
+  │  Closure / Lambda            │  ~60 bytes (delegate + captured) │
+  │  params object[]             │  ~variable (boxing + array)      │
+  │  ToString()                  │  ~40+ bytes (new string)         │
+  ├──────────────────────────────┼──────────────────────────────────┤
+  │  10 scripts × 5 allocs/frame │  ~2-5 KB / frame                │
+  │  × 60 frames/second          │  ~120-300 KB / second            │
+  │  → GC trigger mỗi ~10-30 giây│  → Giật định kỳ!                │
+  └──────────────────────────────┴──────────────────────────────────┘
+
+
+Giải pháp Zero-GC:
+
+  ┌──────────────────────────────────────────────────────────────┐
+  │  ❌ TRÁNH                     │  ✅ THAY BẰNG                 │
+  ├──────────────────────────────┼───────────────────────────────┤
+  │  string concat               │  StringBuilder (reuse)        │
+  │  new List<T>() mỗi frame    │  Pool hoặc NativeList          │
+  │  GetComponent<T>()           │  Cache reference ở Awake()    │
+  │  LINQ                        │  for loop thủ công            │
+  │  foreach trên List           │  for (int i=0; ...) loop      │
+  │  Lambda / Closure            │  static method + struct data  │
+  │  class (reference type)       │  struct (value type)          │
+  │  Managed arrays              │  NativeArray<T>               │
+  └──────────────────────────────┴───────────────────────────────┘
+```
+
+### 4.2. Deep Dive: IL2CPP & Boehm GC — Bí mật của "Cơ chế bảo thủ"
+
+Khi bạn build Unity sang IL2CPP, "bộ não" quản lý bộ nhớ của bạn chính là **Boehm-Demers-Weiser Garbage Collector (Boehm GC)**.
+
+#### 1. Sự thay thế hành động "new"
+Khi bạn viết `new MyClass()`, IL2CPP dịch sang C++ không dùng `malloc` tiêu chuẩn mà dùng hàm riêng:
+```cpp
+// Code C++ do IL2CPP sinh ra
+MyClass_t* obj = (MyClass_t*)il2cpp_codegen_object_new(MyClass_TypeInfo);
+// Hàm này cuối cùng gọi xuống GC_malloc của Boehm GC.
+```
+→ **Kết luận:** Bộ nhớ Managed Heap của Unity tách biệt hoàn toàn với Native Heap của C++.
+
+#### 2. Kẻ dọn rác "Bảo thủ" (Conservative GC)
+Khác với .NET hiện đại (Precise GC), Boehm GC là một GC **Bảo thủ**.
+*   **Vấn đề:** Trong C++, một giá trị `0x12345678` có thể là số nguyên, hoặc có thể là một địa chỉ bộ nhớ. C++ không nói cho GC biết cái nào là cái nào.
+*   **Cơ chế "Thà nhầm còn hơn bỏ sót":** Boehm GC quét Stack/Registers. Nếu thấy giá trị nào **giống** địa chỉ (nằm trong dải của Heap), nó coi đó là Reference.
+*   **Hệ quả:** Thỉnh thoảng một object đáng lẽ phải chết vẫn được giữ lại chỉ vì có một biến `int` nào đó có giá trị trùng với địa chỉ của nó. Nhưng bù lại, nó hoạt động cực kỳ ổn định trên môi trường C++ không an toàn.
+
+#### 3. Incremental GC & Write Barriers
+Để tránh "GC Spikes" (giật lag do GC dừng game quá lâu), Unity dùng Incremental GC. Để làm được điều này trên C++, IL2CPP chèn thêm **Write Barriers**:
+```cpp
+// Dòng code a.child = b;
+Il2CppCodeGenWriteBarrier(&a->child, b);
+```
+Hàm này báo cho GC: "Này, tham chiếu này vừa thay đổi, hãy đánh dấu để kiểm tra lại ở bước tiếp theo!". Nhờ đó GC có thể làm việc từng chút một mà không bị sai lệch dữ liệu khi game đang chạy.
+
 
