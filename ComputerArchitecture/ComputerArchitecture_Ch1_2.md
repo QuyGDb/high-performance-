@@ -1496,90 +1496,6 @@ graph TD
 > *   CPU có 2 bộ Cache L1 riêng biệt: **L1i (Instruction)** cho Code và **L1d (Data)** cho Biến.
 > *   Việc tách Code (System) và Data (Component) giúp CPU tận dụng tối đa băng thông của cả 2 Cache này song song, không bị tranh chấp. Architecture OOP truyền thống (Data và Logic trộn lẫn trong 1 object) thường gây ra Structural Hazard ngầm.
 
-### 5.4. Ảnh hưởng thực tế trong Unity (Real-world Examples)
-
-#### A. Data Hazard — Dependency Chain
-Trong Unity ECS/Burst, Data Hazard thường xuất hiện khi các lệnh tính toán phụ thuộc nhau quá chặt chẽ (Serial Dependency), khiến CPU không thể tận dụng khả năng chạy song song (ILP).
-
-**Ví dụ: Tính toán vật lý tuần tự**
-```csharp
-// [BAD] Serial Dependency Chain
-// Kết quả 'x' của bước trước cần NGAY LẬP TỨC cho bước sau
-float x = position.x;
-x = x + velocity.x * dt;    // Dependency 1 (Wait Add)
-x = x * friction;           // Dependency 2 (Wait Mul)
-x = math.sqrt(x);           // Dependency 3 (Wait Sqrt) 
-// -> CPU phải đợi từng bước xong! Pipeline bị rỗng (pipeline bubble).
-position.x = x;
-```
-
-**Giải pháp: Instruction Level Parallelism (ILP)**
-Hãy viết code sao cho CPU có thể làm nhiều việc độc lập cùng lúc.
-```csharp
-// [GOOD] Independent Math
-// Tính x và y song song. CPU có thể nạp lệnh tính y vào pipeline
-// ngay khi lệnh tính x đang chạy (vì y không cần kết quả của x).
-float newX = position.x + velocity.x * dt * friction; 
-float newY = position.y + velocity.y * dt * friction; // Không phụ thuộc dòng trên!
-
-// Burst Compiler sẽ tự động vector hóa (SIMD) đoạn này dễ dàng hơn.
-position.x = newX;
-position.y = newY;
-```
-
-#### B. Control Hazard — "Sát thủ" Branching
-Đây là ví dụ kinh điển về việc `if/else` làm gãy pipeline khi CPU đoán sai nhánh (Misprediction).
-
-```csharp
-// ═══ Kịch bản: Xử lý 10,000 entities, 50% alive, 50% dead ═══
-
-// [BAD] Code có Branch (if/else)
-[BurstCompile]
-public void Execute(int i)
-{
-    if (healths[i].Value > 0)        // Branch — CPU phải đoán!
-    {
-        positions[i] += velocities[i] * dt;
-        healths[i] -= poisonDamage;
-    }
-    // Nếu sai -> Flush Pipeline (tốn ~15-20 cycles/lần)
-}
-
-// [GOOD] Branchless (math.select)
-[BurstCompile]
-public void Execute(int i)
-{
-    // Dùng math.select (CMOV) để không cần rẽ nhánh
-    bool isAlive = healths[i].Value > 0;
-    float keep = math.select(0f, 1f, isAlive);
-
-    // Luôn tính toán (nhân với 0 nếu chết), nhưng Pipeline chạy mượt
-    positions[i] += velocities[i] * dt * keep;
-    healths[i] -= poisonDamage * keep;
-}
-```
-
-#### C. Structural Hazard — I-Cache Pollution & OOP
-Trong game dev, Structural Hazard thường biểu hiện ở việc **tranh chấp Cache** giữa Code (Instructions) và Data, đặc biệt khi dùng OOP quá đà (Virtual Call Hell).
-
-**Ví dụ: Virtual Calls trong mảng đa hình**
-Khi bạn có `List<Monster>` chứa 10 loại quái khác nhau (Zombie, Skeleton, Orc...), và gọi `monster.Update()`:
-1.  **Instruction Cache (L1i):** CPU phải nạp code hàm `Zombie.Update`, rồi `Skeleton.Update`... Code thay đổi liên tục khiến L1i bị "tràn" (Thrashing).
-2.  **Data Cache (L1d):** Dữ liệu rải rác trong Heap (Class OOP) gây Cache Miss.
-3.  **Hậu quả:** CPU vừa đợi nạp Code, vừa đợi nạp Data. Pipeline tắc nghẽn hoàn toàn.
-
-**Giải pháp: Data-Oriented Design (DOD)**
-ECS tách biệt Data và Code:
--   **Code:** Chỉ có 1 hàm `System` duy nhất chạy cho 10,000 entities cùng loại (Archetype) → Nằm gọn trong L1i Cache.
--   **Data:** Nằm liền nhau trong Chunk → Tối ưu L1d Cache.
--   **Kết quả:** Pipeline luôn được cấp đủ nguyên liệu (Data) và công cụ (Code) để chạy max tốc độ.
-
-#### Tổng kết: Branch vs Branchless
-| Loại | TỐT KHI | HẠN CHẾ |
-| :--- | :--- | :--- |
-| **Branch (if/else)** | Một nhánh chiếm >90% hoặc khối lượng tính toán ở mỗi nhánh cực lớn (skip được bao nhiêu việc). | Gây Stall khi CPU đoán sai (pattern ngẫu nhiên). |
-| **Branchless (select)** | Pattern dữ liệu ngẫu nhiên (50/50), code tính toán nhẹ (cộng trừ nhân chia). | Tốn cycle tính toán thừa (tính cả 2 nhánh) — nhưng thường vẫn nhanh hơn Stall. |
-
 ---
 
 ## 6. Flip-flop — Viên gạch đầu tiên của Bộ nhớ
@@ -1832,32 +1748,71 @@ Tốc độ qua các thế hệ (1980 → nay):
 
   → "Memory Wall": CPU phải CHỜ RAM hàng trăm chu kỳ.
      Mỗi chu kỳ chờ = lãng phí hàng tỷ phép tính/giây.
-
+```
 
 Giải pháp = Cache (Bộ đệm SRAM nằm trên chip CPU):
 
-  ┌──────────────────────────────────┐
-  │  CPU Die (Mặt cắt chip thật)    │
-  │                                  │
-  │  ┌──────┐  ┌──────┐             │
-  │  │Core 0│  │Core 1│             │
-  │  │┌─L1─┐│  │┌─L1─┐│             │
-  │  │└────┘│  │└────┘│             │
-  │  │┌─L2─┐│  │┌─L2─┐│             │
-  │  │└────┘│  │└────┘│             │
-  │  └──────┘  └──────┘             │
-  │                                  │
-  │  ┌──────────────────────────┐    │
-  │  │     L3 Cache (Shared)    │    │    ← SRAM chiếm >50% diện tích chip!
-  │  └──────────────────────────┘    │
-  │                                  │
-  └──────────────────────────────────┘
-         │
-         │  (Đường bus ra ngoài chip)
-         ▼
-  ┌──────────────────┐
-  │  DDR5 RAM (DRAM) │   ← Chip riêng biệt trên mainboard
-  └──────────────────┘
+```mermaid
+graph TD
+    subgraph CPU_Die ["CPU DIE (Nằm trực tiếp trên Chip)"]
+        direction TB
+        subgraph Core0 ["Core 0"]
+            L1_0["L1 Cache\n(32-64 KB)\n~0.5ns / 4 cycles"]:::fast
+            L2_0["L2 Cache\n(256 KB - 1 MB)\n~3ns / 12 cycles"]:::mid
+            L1_0 --- L2_0
+        end
+
+        subgraph Core1 ["Core 1"]
+            L1_1["L1 Cache\n(32-64 KB)\n~0.5ns / 4 cycles"]:::fast
+            L2_1["L2 Cache\n(256 KB - 1 MB)\n~3ns / 12 cycles"]:::mid
+            L1_1 --- L2_1
+        end
+
+        L3["<b>L3 Cache (Shared)</b>\n(2 - 64+ MB)\n~15ns / 40+ cycles"]:::shared
+        
+        L2_0 --- L3
+        L2_1 --- L3
+    end
+
+    RAM[("<b>DDR5 RAM (DRAM)</b>\n(16 - 128+ GB)\n~100ns / 200+ cycles")]:::slow
+    
+    L3 <==> |"Memory Bus"| RAM
+
+    %% Styling
+    classDef fast fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,font-weight:bold
+    classDef mid fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+    classDef shared fill:#e1bee7,stroke:#8e24aa,stroke-width:3px,color:#4a148c
+    classDef slow fill:#eceff1,stroke:#455a64,stroke-dasharray: 5 5
+```
+
+#### Kim tự tháp Memory Hierarchy
+
+```mermaid
+graph TD
+    %% Pyramid Structure
+    REG["<b>Registers</b><br/>(Dưới 1 KB)<br/>0.2 ns"]:::p1
+    L1["<b>L1 Cache</b><br/>(Vài chục KB)<br/>0.5 ns"]:::p2
+    L2["<b>L2 Cache</b><br/>(Vài trăm KB)<br/>3-10 ns"]:::p3
+    L3["<b>L3 Cache</b><br/>(Vài MB)<br/>20-40 ns"]:::p4
+    RAM["<b>RAM (Main Memory)</b><br/>(16-64 GB)<br/>100 ns"]:::p5
+    SSD["<b>SSD / Disk</b><br/>(TB)<br/>Hàng nghìn ns"]:::p6
+
+    REG --- L1 --- L2 --- L3 --- RAM --- SSD
+
+    %% Labels
+    note1[/"<b>TỐC ĐỘ / GIÁ THÀNH TĂNG</b>"/]:::up
+    note2[/"<b>DUNG LƯỢNG TĂNG</b>"/]:::down
+
+    %% Styling
+    classDef p1 fill:#d32f2f,color:#fff,stroke:#b71c1c
+    classDef p2 fill:#f44336,color:#fff,stroke:#c62828
+    classDef p3 fill:#ef5350,color:#fff,stroke:#e53935
+    classDef p4 fill:#e57373,color:#fff,stroke:#ef5350
+    classDef p5 fill:#ef9a9a,color:#000,stroke:#e57373
+    classDef p6 fill:#ffcdd2,color:#000,stroke:#ef9a9a
+    
+    classDef up fill:none,stroke:#d32f2f,stroke-width:2px,color:#d32f2f
+    classDef down fill:none,stroke:#1976d2,stroke-width:2px,color:#1976d2
 ```
 
 ### 9.2. Cache Line — Đơn vị truyền dữ liệu cơ bản
@@ -1870,14 +1825,33 @@ Nó luôn đọc 1 CACHE LINE = 64 BYTES.
 
 Ví dụ: Bạn truy cập array[0] (4 bytes int):
 
-  RAM:
-  ┌────┬────┬────┬────┬────┬────┬────┬────┬────┬────┬────┬────┬────┬────┬────┬────┐
-  │ [0]│ [1]│ [2]│ [3]│ [4]│ [5]│ [6]│ [7]│ [8]│ [9]│[10]│[11]│[12]│[13]│[14]│[15]│
-  │ 4B │ 4B │ 4B │ 4B │ 4B │ 4B │ 4B │ 4B │ 4B │ 4B │ 4B │ 4B │ 4B │ 4B │ 4B │ 4B │
-  └────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴────┘
-  ◄──────────── 64 bytes (1 Cache Line) ────────────►
+```mermaid
+graph LR
+    subgraph RAM_Layout ["RAM (Tổ chức theo dòng 64 Bytes)"]
+        direction LR
+        B0["Int[0]\n(4B)"]:::target
+        B1["Int[1]\n(4B)"]:::neighbor
+        B2["Int[2]\n(4B)"]:::neighbor
+        B3["Int[3]\n(4B)"]:::neighbor
+        Dots["..."]:::neighbor
+        B15["Int[15]\n(4B)"]:::neighbor
+        
+        B0 --- B1 --- B2 --- B3 --- Dots --- B15
+    end
 
-  Bạn chỉ cần [0], nhưng CPU tải TOÀN BỘ 64 bytes vào L1 Cache.
+    subgraph L1_Cache ["L1 Cache Slot (Dân chơi vác cả bó)"]
+        Slot["Slot 64B mới nạp"]:::cache
+    end
+
+    B0 -.-> |"1. Bạn chỉ xin Int[0]"| Slot
+    RAM_Layout ==> |"2. CPU vác nguyên 64B về cất"| Slot
+
+    classDef target fill:#e3f2fd,stroke:#1565c0,font-weight:bold
+    classDef neighbor fill:#f5f5f5,stroke:#9e9e9e
+    classDef cache fill:#fff9c4,stroke:#fbc02d,stroke-width:2px
+```
+
+Bạn chỉ cần [0], nhưng CPU tải TOÀN BỘ 64 bytes vào L1 Cache.
   → [1] đến [15] đã có sẵn trong Cache → truy cập miễn phí!
 
 
@@ -2024,6 +1998,57 @@ graph LR
 
 - ✅ **Cân bằng:** Giảm conflict miss đáng kể mà không quá đắt đỏ như Fully Associative.
 - 💡 **Thực tế:** L1 thường là 8-way, L2 là 16-way.
+
+### 9.4. Cache trong Pipeline — "Cửa hàng tiện lợi" nằm ở đâu?
+
+Caches không đứng một mình mà đan xen trực tiếp vào 5 giai đoạn của Pipeline. Đây là cách chúng phối hợp:
+
+```mermaid
+flowchart LR
+    %% stages
+    IF["<b>① FETCH</b>\n(Lấy lệnh)"]:::stage
+    ID["<b>② DECODE</b>\n(Giải mã)"]:::stage
+    EXE["<b>③ EXECUTE</b>\n(Tính toán)"]:::stage
+    MEM["<b>④ MEMORY</b>\n(Đọc/Ghi data)"]:::stage
+    WB["<b>⑤ WRITEBACK</b>\n(Ghi Reg)"]:::stage
+
+    %% Caches
+    L1i[("<b>L1i Cache</b>\n(Instruction)")]:::cache_box
+    L1d[("<b>L1d Cache</b>\n(Data)")]:::cache_box
+    L2[("<b>L2 / L3 Cache</b>\n(Shared Backstop)")]:::backstop
+
+    %% Connections
+    IF <--> |"Query Code"| L1i
+    MEM <--> |"Query Data"| L1d
+    
+    L1i -.-> |"Miss"| L2
+    L1d -.-> |"Miss"| L2
+    
+    IF --> ID --> EXE --> MEM --> WB
+
+    %% Styling
+    classDef stage fill:#e3f2fd,stroke:#1565c0,font-weight:bold
+    classDef cache_box fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    classDef backstop fill:#f5f5f5,stroke:#9e9e9e,stroke-dasharray: 5 5
+```
+
+**Chi tiết quy trình:**
+
+1.  **Stage 1 - FETCH: Gõ cửa L1i**
+    *   CPU dùng Program Counter (PC) để hỏi **L1i Cache**: "Có lệnh ở địa chỉ này không?".
+    *   **Hit:** Lệnh được nạp vào ngay trong 0.5ns. Pipeline chạy tiếp.
+    *   **Miss:** CPU phải đợi L2/L3 hoặc RAM trả code về. Pipeline **Stall** (tắc nghẽn).
+
+2.  **Stage 4 - MEMORY: Gõ cửa L1d**
+    *   Sau khi tính toán xong địa chỉ ở Stage 3, Stage 4 sẽ hỏi **L1d Cache**: "Lấy/Ghi dữ liệu ở đây cho tôi".
+    *   Đây là nơi các mảng (Array), Struct (Component) trong Unity ECS được truy cập.
+    *   **Hit:** Dữ liệu có sẵn -> Cực nhanh.
+    *   **Miss:** CPU phải đợi RAM (~100ns) -> Gây ra **Data Hazard** mà ta đã học ở Section 5.
+
+3.  **L2/L3 Cache: Quản gia chung**
+    *   Nếu L1i hoặc L1d không có thứ CPU cần, chúng sẽ nhìn xuống L2. L2 to hơn nhưng chậm hơn 1 chút. Nếu hụt cả L3 thì mới phải "đi bộ" ra RAM.
+
+> **💡 Kết nối Game Dev:** Khi bạn duyệt một `NativeArray` tuần tự, Stage 4 (MEMORY) sẽ "Hit" cache liên tục vì CPU đã tải sẵn cả Cache Line vào L1d. Nếu bạn truy cập kiểu `Random`, Stage 4 sẽ "Miss" liên tục, làm cả Pipeline 5 bước phải dừng lại chờ RAM.
 
 > **🎯 Ẩn dụ — Tủ khóa Ký túc xá:**
 > - **Direct Mapped** = Mỗi sinh viên được gán **đúng 1 tủ cố định** (theo số MSSV). Nếu 2 SV cùng hash về 1 tủ → tranh nhau, phải luân phiên bỏ đồ ra.
