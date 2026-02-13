@@ -1344,14 +1344,35 @@ Pipeline giúp CPU chạy nhanh, nhưng nó rất dễ bị "tắc đường" b�
 ### 5.1. Data Hazard — Phụ thuộc dữ liệu
 **Khái niệm:** Lệnh sau cần kết quả của lệnh trước **ngay lập tức**, nhưng lệnh trước chưa tính xong. CPU buộc phải dừng (Stall) để chờ.
 
-**Ví dụ:**
-```asm
-ADD R1, R2, R3    ; R1 đang được tính (chưa xong)
-SUB R4, R1, R5    ; Cần R1 NGAY LẬP TỨC -> Phải chờ!
-```
-
-> **🌟 Ứng dụng (Programming Takeaway):**
-> Tránh **Dependency Chain** quá dài trong một vòng lặp. Nếu biến `A` phụ thuộc `B`, `B` phụ thuộc `C`... CPU sẽ không thể tận dụng *Out-of-Order Execution* để chạy song song. Hãy viết code độc lập dữ liệu (Data Independence) càng nhiều càng tốt.
+> **🎮 Game Dev Deep Dive: Serial Dependency Chain**
+> 
+> Trong Unity ECS/Burst, Data Hazard thường xuất hiện khi các lệnh tính toán phụ thuộc nhau quá chặt chẽ (**Serial Dependency**), khiến CPU không thể tận dụng khả năng chạy song song (ILP).
+> 
+> **Ví dụ: Tính toán vật lý tuần tự**
+> ```csharp
+> // [BAD] Serial Dependency Chain
+> // Kết quả 'x' của bước trước cần NGAY LẬP TỨC cho bước sau
+> float x = position.x;
+> x = x + velocity.x * dt;    // Dependency 1 (Wait Add)
+> x = x * friction;           // Dependency 2 (Wait Mul)
+> x = math.sqrt(x);           // Dependency 3 (Wait Sqrt) 
+> // -> CPU phải đợi từng bước xong! Pipeline bị rỗng (pipeline bubble).
+> position.x = x;
+> ```
+> 
+> **Giải pháp: Instruction Level Parallelism (ILP)**
+> Hãy viết code sao cho CPU có thể làm nhiều việc độc lập cùng lúc.
+> ```csharp
+> // [GOOD] Independent Math
+> // Tính x và y song song. CPU có thể nạp lệnh tính y vào pipeline
+> // ngay khi lệnh tính x đang chạy (vì y không cần kết quả của x).
+> float newX = position.x + velocity.x * dt * friction; 
+> float newY = position.y + velocity.y * dt * friction; // Không phụ thuộc dòng trên!
+> 
+> // Burst Compiler sẽ tự động vector hóa (SIMD) đoạn này dễ dàng hơn.
+> position.x = newX;
+> position.y = newY;
+> ```
 
 ### 5.2. Control Hazard — Nhánh rẽ (Branching)
 **Khái niệm:** Khi gặp lệnh `if/else`, CPU không biết nên nạp lệnh nào tiếp theo vào Pipeline. Nó buộc phải "đoán mò" (Branch Prediction). Nếu đoán sai, toàn bộ công sức nạp lệnh trước đó phải đổ bỏ (Flush Pipeline), gây lãng phí lớn (15-20 cycles).
@@ -1365,20 +1386,55 @@ SUB R4, R1, R5    ; Cần R1 NGAY LẬP TỨC -> Phải chờ!
 >     *   **Đúng:** Khách VIP thật → Có đồ ăn ngay (Hiệu năng cao).
 >     *   **Sai:** Khách thường → **Vứt hết** bò Wagyu đã nướng (Flush Pipeline), lúi húi làm lại bò thường (Tốn kém).
 
-**Ví dụ:**
-```csharp
-if (health > 0) Attack(); // CPU phải đoán: Có lớn hơn 0 không?
-else Die();
-```
-
-
-> **🌟 Ứng dụng (Programming Takeaway):**
-> Hạn chế `if/else` trong các **Hot Loop** (vòng lặp chạy hàng nghìn lần/khung hình).
-> *   **Tốt:** Dùng thuật toán **Branchless** (Bitwise, Math) để loại bỏ `if`.
-> *   **Tốt:** Sắp xếp data để điều kiện `true` tập trung một chỗ, `false` một chỗ (giúp CPU đoán đúng nhiều hơn).
+> **🎮 Game Dev Deep Dive: "Sát thủ" Branching**
+> 
+> Đây là ví dụ kinh điển về việc `if/else` làm gãy pipeline khi CPU đoán sai nhánh (Misprediction).
+> 
+> **Kịch bản: Xử lý 10,000 entities, 50% alive, 50% dead**
+> 
+> ```csharp
+> // [BAD] Code có Branch (if/else)
+> [BurstCompile]
+> public void Execute(int i)
+> {
+>     if (healths[i].Value > 0)        // Branch — CPU phải đoán!
+>     {
+>         positions[i] += velocities[i] * dt;
+>         healths[i] -= poisonDamage;
+>     }
+>     // Nếu sai -> Flush Pipeline (tốn ~15-20 cycles/lần)
+> }
+> ```
+> 
+> **Giải pháp: Branchless Programming**
+> 
+> ```csharp
+> // [GOOD] Branchless (math.select)
+> [BurstCompile]
+> public void Execute(int i)
+> {
+>     // Dùng math.select (CMOV) để không cần rẽ nhánh
+>     bool isAlive = healths[i].Value > 0;
+>     float keep = math.select(0f, 1f, isAlive);
+> 
+>     // Luôn tính toán (nhân với 0 nếu chết), nhưng Pipeline chạy mượt
+>     positions[i] += velocities[i] * dt * keep;
+>     healths[i] -= poisonDamage * keep;
+> }
+> ```
 
 ### 5.3. Structural Hazard — Tranh chấp tài nguyên
 **Khái niệm:** Hai lệnh khác nhau muốn sử dụng cùng một bộ phận phần cứng trong cùng một chu kỳ (ví dụ: vừa muốn nạp Lệnh từ RAM, vừa muốn nạp Dữ liệu từ RAM).
+
+**Giải pháp Phần Cứng: Kiến trúc Harvard (Harvard Architecture)**
+Để giải quyết sự tranh chấp "đường đi" này, các kỹ sư tách bộ nhớ làm 2 luồng riêng biệt (khác với Von Neumann cổ điển dùng chung 1 bus):
+*   **Von Neumann (Cổ điển):** Code và Data đi chung 1 con đường => Dễ tắc đường (Structural Hazard).
+*   **Harvard (Hiện đại - Modified):** Tách biệt Code và Data ngay từ cấp độ L1 Cache.
+    *   **L1i Cache (Instruction):** Chỉ chứa Code.
+    *   **L1d Cache (Data):** Chỉ chứa Data.
+    *   **Lợi ích:** CPU có thể vừa nạp lệnh (Fetch) vừa đọc dữ liệu (Memory Access) **cùng 1 lúc** mà không đánh nhau.
+
+> **Tuy nhiên:** Dù phần cứng đã tách L1i/L1d, nếu code của bạn quá lộn xộn (OOP Virtual Call) thì vẫn gây tắc nghẽn cục bộ. Xem ví dụ dưới đây:
 
 > **🎮 Game Dev Deep Dive: I-Cache Pollution & OOP**
 > 
