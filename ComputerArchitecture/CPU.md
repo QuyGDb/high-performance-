@@ -12,7 +12,7 @@
   - [2. MOSFET — Transistor hiện đại](#2-mosfet-—-transistor-hiện-đại)
   - [3. Từ Transistor → Logic Gates (Cổng Logic)](#3-từ-transistor--logic-gates-cổng-logic)
   - [4. Xây dựng mạch Tính toán & ALU (Arithmetic Logic Unit)](#4-xây-dựng-mạch-tính-toán--alu-arithmetic-logic-unit)
-  - [6. Mảnh ghép còn thiếu — Kẻ đã quên mình là ai](#6-mảnh-ghép-còn-thiếu-—-kẻ-đã-quên-mình-là-ai)
+  - [5. Mảnh ghép còn thiếu — Kẻ đã quên mình là ai](#5-mảnh-ghép-còn-thiếu-—-kẻ-đã-quên-mình-là-ai)
 - [Chương 2: Memory & Storage — Từ Flip-flop đến RAM](#chương-2-memory--storage-—-từ-flip-flop-đến-ram)
   - [1. Vấn đề: CPU nhanh, Bộ nhớ chậm](#1-vấn-đề-cpu-nhanh-bộ-nhớ-chậm)
   - [2. Clock & Cycle — "Nhịp tim" của CPU](#2-clock--cycle-—-nhịp-tim-của-cpu)
@@ -26,7 +26,11 @@
   - [10. Cache Associativity – Dữ liệu nằm ở đâu?](#10-cache-associativity-–-dữ-liệu-nằm-ở-đâu)
   - [11. Cache Coherency – Vấn đề "Tam sao thất bản" ở Đa lõi](#11-cache-coherency-–-vấn-đề-tam-sao-thất-bản-ở-đa-lõi)
   - [12. Kết nối Unity - Cache Locality là TẤT CẢ](#12-kết-nối-unity---cache-locality-là-tất-cả)
-  - [11. Tổng kết Chapter 2](#11-tổng-kết-chapter-2)
+- [Chương 3: OS & Unity Runtime — Từ C# đến Transistor](#chương-3-os--unity-runtime-—-từ-c-sang-transistor)
+  - [1. Stack vs. Heap — Trận chiến của Tốc độ và Linh hoạt](#1-stack-vs-heap-—-trận-chiến-của-tốc-độ-và-linh-hoạt)
+  - [2. Stack & Function Calls — Cái giá của mỗi lần gọi hàm](#2-stack--function-calls-—-cái-giá-của-mỗi-lần-gọi-hàm)
+  - [3. Từ C# đến Mã máy — Ba con đường trong Unity](#3-từ-c-đến-mã-máy-—-ba-con-đường-trong-unity)
+  - [4. Garbage Collection — "Stop the World"](#4-garbage-collection-—-stop-the-world)
 
 ---
 
@@ -921,7 +925,7 @@ Bước 6: Kết quả 8 ghi lại vào R1
 ```
 
 
-## 6. Mảnh ghép còn thiếu — Kẻ đã quên mình là ai
+## 5. Mảnh ghép còn thiếu — Kẻ đã quên mình là ai
 
 Chúng ta đã xây dựng được ALU — một cỗ máy tính toán siêu việt từ hàng nghìn cổng logic.
 - Nó có thể tính `5000 + 3000` trong nháy mắt.
@@ -1853,6 +1857,8 @@ Bạn dùng `NativeArray<MonsterData>`, mỗi `MonsterData` là một Struct (Va
 > - Unity ECS nhanh không phải vì ECS "thông minh hơn", mà vì nó **đặt dữ liệu đúng chỗ** để CPU Cache hoạt động hiệu quả nhất.
 
 ---
+
+# Chương 3: OS & Unity Runtime — Từ C# đến Transistor
 
 ## 1. Stack vs. Heap — Trận chiến của Tốc độ và Linh hoạt
 
